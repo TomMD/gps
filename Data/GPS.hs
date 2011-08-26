@@ -140,7 +140,7 @@ slidingAverageSpeed m n (x:xs) =
               mid = len `div` 2
           in if V.length ss' < 3
              then mean ss'
-             else if odd len then ss' ! mid else mean (V.slice mid 1 ss')
+             else if odd len then ss' ! mid else mean (V.slice mid 2 ss')
         AvgEndPoints -> fromMaybe 0 . join . fmap (speed x) $ e
         AvgMinOf as -> minimum $ map (getAvg cs) as
         AvgWith f -> f (map getDMSPair cs)
