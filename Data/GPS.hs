@@ -12,7 +12,8 @@ module Data.GPS
        , Trail
        , AvgMethod(..)
        , PointGrouping(..)
-       , TrailProcessing(..)
+       , TrailTransformation(..)
+       , Selected(..)
          -- * Constants
        , north
        , south
@@ -57,6 +58,7 @@ import Data.Time
 import Data.Maybe (listToMaybe)
 import Data.Fixed
 import Control.Monad
+import Control.Arrow (first, second)
 
 -- These modules are used for filtering speeds and other trail features
 import Statistics.Function as F
@@ -229,14 +231,15 @@ getRadianPair p = (toRadians (lat p), toRadians (lon p))
 toRadians :: Floating f => f -> f
 toRadians = (*) (pi / 180)
 
-data TrailProcessing
+data TrailTransformation c
      = LinearTime
      | MaxSpeed Speed
      | ElimRestLocations Distance NominalDiffTime
-     | BezierCurve PointGrouping
+     | BezierCurve (PointGrouping c)
+     | TransformBy ([c] -> [c])
      deriving (Show)
               
-data PointGrouping
+data PointGrouping c
   = BetweenSpeeds Speed Speed  -- ^ Groups trail segments into
                                -- contiguous points within the speed
                                -- and all others outside of the speed.
@@ -250,10 +253,27 @@ data PointGrouping
                                        -- given distance for at least
                                        -- a particular amount of time.
   | SpansTime NominalDiffTime -- ^ Perhaps the most trivial grouping, chunking points into groups spanning at most the given time interval
-  | IntersectionOf [PointGrouping] -- ^ intersects the given groupings
-  | GroupBy ( [(LatitudeType,LongitudeType)] -> [[(LatitudeType,LongitudeType)]] )
+  | IntersectionOf [PointGrouping c] -- ^ intersects the given groupings
+  | GroupBy ( [c] -> [Selected [c]] )
     deriving (Show)
              
+data Selected a = Select {unSelect :: a} | NotSelect {unSelect :: a}
+
+isSelect :: Selected a -> Bool
+isSelect (Select _) = True
+isSelect _ = False
+
+selLength :: Selected [a] -> Int
+selLength = length . unSelect
+
+onSelected :: (a -> a) -> Selected a -> a
+onSelected f (Select a) = f a
+onSelected _ (NotSelect a) = a
+
+instance Functor Selected where
+  fmap f (Select x) = Select $ f x
+  fmap f (NotSelect x) = NotSelect $ f x
+
 -- Grouping point _does not_ result in deleted points. It is always true that:
 --
 --     concat (groupPoints x ts) == ts -- forall x
@@ -261,28 +281,29 @@ data PointGrouping
 -- The purpose of grouping is usually for later processing.  Any desire to drop
 -- points that didn't meet a particular grouping criteria can be filled with
 -- a composition with 'filter' (or directly via 'filterPoints'.
-groupPoints :: (Lat a, Lon a, Time a) => PointGrouping -> Trail a -> [Trail a]
+groupPoints :: (Lat a, Lon a, Time a) => PointGrouping a -> Trail a -> [Selected (Trail a)]
 groupPoints (BetweenSpeeds low hi) ps =
   let spds = concatMap maybeToList $ zipWith speed ps (drop 1 ps)
       psSpds = [(p,s) | p <- ps, s <- maybeToList (listToMaybe spds) ++ spds]
       inRange x = x >= low && x <= hi
       chunk [] = []
       chunk xs@(x:_) =
-        let op = if inRange (snd x) then span else break
+        let op p = if inRange (snd x) then first Select . span p else first NotSelect . break p
             (r,rest) = op (inRange . snd) xs
         in r : chunk xs
-  in map (map fst) $ chunk psSpds
+  in map (fmap (map fst)) $ chunk psSpds
 groupPoints (RestPoint d s) ps =
-  let consToFirst x [] = [[x]]
-      consToFirst x (a:as) = (x:a) : as
-      go [] nonRests = [reverse nonRests]
+  let consToFirst x [] = [NotSelect [x]]
+      consToFirst x (a:as) = (fmap (x:) a) : as
+      go [] [] = []
+      go [] nonRests = [NotSelect $ reverse nonRests]
       go (a:as) nonRests =
         case takeWhileLast ((<=) d . distance a) as of
           (Just l, close, far) ->
             case (getUTCTime a, getUTCTime l) of
               (Just t1, Just t2) ->
                 let diff = diffUTCTime t2 t1
-                in if diff >= s then reverse nonRests : (a:close) : go far [] else go as (a:nonRests)
+                in if diff >= s then NotSelect (reverse nonRests) : Select (a:close) : go far [] else go as (a:nonRests)
               _ -> consToFirst a $ go as nonRests
           _ -> consToFirst a $ go as nonRests
   in go ps []
@@ -291,33 +312,23 @@ groupPoints (SpansTime n) ps =
       chunk [] = []
       chunk (x:xs) =
         let (good,rest) = span ((<= addUTCTime n (snd x)) . snd) xs in good : chunk rest
-  in map (map fst) $ chunk times
+  in map (Select . map fst) $ chunk times
 groupPoints (IntersectionOf gs) ps =
   let groupings = map (flip groupPoints ps) gs
-      dropExact :: Int -> [Int] -> [Int]
+      dropExact :: Int -> [Selected [a]] -> [Selected [a]]
       dropExact i [] = []
-      dropExact i [x]
-        | x <= i = []
-        | True   = [x - i]
-      dropExact i (x:y:xs)
-        | x > i = x - i : y : xs
-        | True  = dropExact (i-x) (y:xs)
-      -- chunk :: [[Int]] -> pnts -> [pnts]
+      dropExact i (x:xs) = if selLength x == 0 then xs else fmap (drop i) x : xs
+      -- chunk :: [[Selected [pnts]]] -> pnts -> [pnts]
       chunk _ [] = []
-      chunk lens xs = 
-        let minLen = max 1 . minimum . concatMap (take 1) $ lens
+      chunk ggs xs = 
+        let minLen = max 1 . minimum . concatMap (take 1) $ map (map selLength) ggs   -- FIXME this is all manner of broken
+            sel = if all isSelect (concatMap (take 1) ggs) then Select else NotSelect
             (c,rest) = splitAt minLen xs
-        in c : chunk (filter (not . null) $ map (dropExact minLen) lens) rest
-  in chunk (map (map length) groupings) ps
-groupPoints (GroupBy f) ps =
-  let xs = map length $ f (map getDMSPair ps)
-      chunk [] [] = []
-      chunk [] vs = [vs]
-      chunk (l:ls) vs =
-        let (h,rest) = splitAt l vs in h : chunk ls rest
-  in chunk xs ps
+        in sel c : chunk (filter (not . null) $ map (dropExact minLen) ggs) rest
+  in chunk groupings ps
+groupPoints (GroupBy f) ps = f ps
 
-filterPoints :: (Lat a, Lon a, Time a) => PointGrouping -> Trail a -> [Trail a]
+filterPoints :: (Lat a, Lon a, Time a) => PointGrouping a -> Trail a -> [Trail a]
 filterPoints = error "FIXME, implement me"
 
 mkTimePair :: (Lat a, Lon a, Time a) => Trail a -> [(a,UTCTime)]
@@ -353,10 +364,11 @@ interpolate c1 c2 w =
       v = (h, d * (1 - w))
   in addVector v c1
 
-transformTrail :: (Lat a, Lon a, Time a) => TrailProcessing -> Trail a -> Trail a
+transformTrail :: (Lat a, Lon a, Time a) => TrailTransformation a -> Trail a -> Trail a
 transformTrail LinearTime ts = linearTime ts
 transformTrail (MaxSpeed x) ts = filterByMaxSpeed x ts
-transformTrail (BezierCurve grp) ts = concatMap transformToBezierCurve (groupPoints grp ts)
+transformTrail (BezierCurve grp) ts = concatMap (onSelected transformToBezierCurve) (groupPoints grp ts)
+transformTrail (TransformBy f) ts = linearTime (f ts)
 
 -- |Filters out any points that go backward in time (thus must not be valid if this is a trail)
 linearTime :: (Lon a, Lat a, Time a) => [a] -> [a]
