@@ -1,4 +1,4 @@
-{-# LANGUAGE MultiParamTypeClasses, FunctionalDependencies, FlexibleInstances, EmptyDataDecls, BangPatterns, ExistentialQuantification #-}
+{-# LANGUAGE MultiParamTypeClasses, FunctionalDependencies, FlexibleInstances, EmptyDataDecls, BangPatterns, TupleSections #-}
 -- |A basic GPS library with calculations for distance and speed along
 -- with helper functions for filtering/smoothing trails.  All distances
 -- are in meters and time is in seconds.  Speed is thus meters/second
@@ -11,6 +11,8 @@ module Data.GPS
        , Vector
        , Trail
        , AvgMethod(..)
+       , PointGrouping(..)
+       , TrailProcessing(..)
          -- * Constants
        , north
        , south
@@ -29,6 +31,8 @@ module Data.GPS
        , totalDistance
        , avgSpeeds
        , slidingAverageSpeed
+       , transformTrail
+       , groupPoints
        , restLocations
        , closestDistance
        , filterByMaxSpeed
@@ -41,9 +45,10 @@ module Data.GPS
 
 import Data.Function (on)
 import Data.Ord (comparing)
-import Data.List (sort, mapAccumL, minimumBy, maximumBy, sortBy)
+import Data.List as L (sort, mapAccumL, minimumBy, maximumBy, sortBy)
 import Data.Maybe
 import Data.Geo.GPX hiding (none, cmt)
+import Text.Show.Functions ()
 
 import Text.XML.HXT.Arrow
 import Text.XML.XSD.DateTime(DateTime, toUTCTime)
@@ -71,6 +76,7 @@ type Heading = Double
 -- |Speed is hard coded as meters per second
 type Speed = Double
 type Vector = (Distance, Heading)
+
 type Trail a = [a]
 
 getUTCTime :: (Lat a, Lon a, Time a) => a -> Maybe UTCTime
@@ -140,7 +146,7 @@ slidingAverageSpeed m n (x:xs) =
               mid = len `div` 2
           in if V.length ss' < 3
              then mean ss'
-             else if odd len then ss' ! mid else mean (V.slice mid 2 ss')
+             else if odd len then ss' V.! mid else mean (V.slice mid 2 ss')
         AvgEndPoints -> fromMaybe 0 . join . fmap (speed x) $ e
         AvgMinOf as -> minimum $ map (getAvg cs) as
         AvgWith f -> f (map getDMSPair cs)
@@ -149,7 +155,7 @@ slidingAverageSpeed m n (x:xs) =
   getSpeeds zs = concatMap (maybeToList . uncurry speed) $ zip zs (drop 1 zs)
 
 -- | Direction two points aim toward (0 = North, pi/2 = West, pi = South, 3pi/2 = East)
-heading         :: (Lat a, Lon a, Lat b, Lon b) => a -> b -> Heading	-- ^ 0 = North, pi/2 = West...
+heading         :: (Lat a, Lon a, Lat b, Lon b) => a -> b -> Heading
 heading a b =
 	atan2	(sin (diffLon) * cos (lat2)) 
 		(cos(lat1) * sin (lat2) - sin(lat1) * cos lat2 * cos (diffLon))
@@ -170,16 +176,6 @@ speed a b =
       in if timeDiff == 0 then Nothing else Just $ (distance a b) / timeDiff
     _ -> Nothing
 
--- |Filter out all points that result in a speed greater than a given
--- value (the second point is dropped)
-filterByMaxSpeed :: (Lat loc, Lon loc, Time loc) => Speed -> Trail loc -> Trail loc
-filterByMaxSpeed mx xs =
-	let ss = zipWith speed xs (drop 1 xs)
-	    fs = filter ((< Just mx) . fst) (zip ss $ drop 1 xs)
-	in take 1 xs ++ map snd fs
-
-data TempTrail a = T (Trail a) a
-
 -- |radius of the earth in meters
 radiusOfEarth :: Double
 radiusOfEarth = 6378700
@@ -192,7 +188,7 @@ north = 0
 south :: Heading
 south = pi
 
--- |East is 270 degrees from North
+-- |East is 270 degrees (3 pi / 2)
 east :: Heading
 east = (3 / 2) * pi
 
@@ -233,13 +229,150 @@ getRadianPair p = (toRadians (lat p), toRadians (lon p))
 toRadians :: Floating f => f -> f
 toRadians = (*) (pi / 180)
 
+data TrailProcessing
+     = LinearTime
+     | MaxSpeed Speed
+     | ElimRestLocations Distance NominalDiffTime
+     | BezierCurve PointGrouping
+     deriving (Show)
+              
+data PointGrouping
+  = BetweenSpeeds Speed Speed  -- ^ Groups trail segments into
+                               -- contiguous points within the speed
+                               -- and all others outside of the speed.
+                               -- The "speed" from point p(i) to p(i+1) is
+                               -- associated with p(i) (execpt for the
+                               -- first speed value, which is
+                               -- associated with both the first and
+                               -- second point)
+  | RestPoint Distance NominalDiffTime -- ^ A "rest point" means the
+                                       -- coordinates were within a
+                                       -- given distance for at least
+                                       -- a particular amount of time.
+  | SpansTime NominalDiffTime -- ^ Perhaps the most trivial grouping, chunking points into groups spanning at most the given time interval
+  | IntersectionOf [PointGrouping] -- ^ intersects the given groupings
+  | GroupBy ( [(LatitudeType,LongitudeType)] -> [[(LatitudeType,LongitudeType)]] )
+    deriving (Show)
+             
+-- Grouping point _does not_ result in deleted points. It is always true that:
+--
+--     concat (groupPoints x ts) == ts -- forall x
+--
+-- The purpose of grouping is usually for later processing.  Any desire to drop
+-- points that didn't meet a particular grouping criteria can be filled with
+-- a composition with 'filter' (or directly via 'filterPoints'.
+groupPoints :: (Lat a, Lon a, Time a) => PointGrouping -> Trail a -> [Trail a]
+groupPoints (BetweenSpeeds low hi) ps =
+  let spds = concatMap maybeToList $ zipWith speed ps (drop 1 ps)
+      psSpds = [(p,s) | p <- ps, s <- maybeToList (listToMaybe spds) ++ spds]
+      inRange x = x >= low && x <= hi
+      chunk [] = []
+      chunk xs@(x:_) =
+        let op = if inRange (snd x) then span else break
+            (r,rest) = op (inRange . snd) xs
+        in r : chunk xs
+  in map (map fst) $ chunk psSpds
+groupPoints (RestPoint d s) ps =
+  let consToFirst x [] = [[x]]
+      consToFirst x (a:as) = (x:a) : as
+      go [] nonRests = [reverse nonRests]
+      go (a:as) nonRests =
+        case takeWhileLast ((<=) d . distance a) as of
+          (Just l, close, far) ->
+            case (getUTCTime a, getUTCTime l) of
+              (Just t1, Just t2) ->
+                let diff = diffUTCTime t2 t1
+                in if diff >= s then reverse nonRests : (a:close) : go far [] else go as (a:nonRests)
+              _ -> consToFirst a $ go as nonRests
+          _ -> consToFirst a $ go as nonRests
+  in go ps []
+groupPoints (SpansTime n) ps =
+  let times  = mkTimePair ps
+      chunk [] = []
+      chunk (x:xs) =
+        let (good,rest) = span ((<= addUTCTime n (snd x)) . snd) xs in good : chunk rest
+  in map (map fst) $ chunk times
+groupPoints (IntersectionOf gs) ps =
+  let groupings = map (flip groupPoints ps) gs
+      dropExact :: Int -> [Int] -> [Int]
+      dropExact i [] = []
+      dropExact i [x]
+        | x <= i = []
+        | True   = [x - i]
+      dropExact i (x:y:xs)
+        | x > i = x - i : y : xs
+        | True  = dropExact (i-x) (y:xs)
+      -- chunk :: [[Int]] -> pnts -> [pnts]
+      chunk _ [] = []
+      chunk lens xs = 
+        let minLen = max 1 . minimum . concatMap (take 1) $ lens
+            (c,rest) = splitAt minLen xs
+        in c : chunk (filter (not . null) $ map (dropExact minLen) lens) rest
+  in chunk (map (map length) groupings) ps
+groupPoints (GroupBy f) ps =
+  let xs = map length $ f (map getDMSPair ps)
+      chunk [] [] = []
+      chunk [] vs = [vs]
+      chunk (l:ls) vs =
+        let (h,rest) = splitAt l vs in h : chunk ls rest
+  in chunk xs ps
+
+filterPoints :: (Lat a, Lon a, Time a) => PointGrouping -> Trail a -> [Trail a]
+filterPoints = error "FIXME, implement me"
+
+mkTimePair :: (Lat a, Lon a, Time a) => Trail a -> [(a,UTCTime)]
+mkTimePair xs =
+  let timesM = map (\x-> fmap (x,) $ getUTCTime x) xs
+  in concatMap maybeToList timesM
+
+transformToBezierCurve :: (Lat a, Lon a, Time a) => Trail a -> Trail a
+transformToBezierCurve xs = 
+  let times = mkTimePair xs
+      end = last times
+      top = head times
+      sndDiff = diffUTCTime `on` snd
+      totalTime  = sndDiff end top
+      queryTimes = [fromTo (sndDiff end t / totalTime) | t <- times]
+      fromTo = fromRational . toRational
+  in if null times
+      then xs
+      else map (bezierPoint xs) queryTimes
+  where
+    
+bezierPoint :: (Lat a, Lon a) => [a] -> Double -> a
+bezierPoint []   _ = error "Can not create a bezier point from an empty list"
+bezierPoint [p0] _ = p0
+bezierPoint ps t   = interpolate (bezierPoint (init ps) t) (bezierPoint (tail ps) t) t
+    
+-- | @interpolate c1 c2 w@ where 0 <= w <= 1 Gives a point on the line
+-- between c1 and c2 equal to @c1 when @w == 0@ (weighted linearly
+-- toward c2).
+interpolate :: (Lat a, Lon a) => a -> a -> Double -> a
+interpolate c1 c2 w =
+  let (h,d) = (heading c1 c2, distance c1 c2)
+      v = (h, d * (1 - w))
+  in addVector v c1
+
+transformTrail :: (Lat a, Lon a, Time a) => TrailProcessing -> Trail a -> Trail a
+transformTrail LinearTime ts = linearTime ts
+transformTrail (MaxSpeed x) ts = filterByMaxSpeed x ts
+transformTrail (BezierCurve grp) ts = concatMap transformToBezierCurve (groupPoints grp ts)
+
 -- |Filters out any points that go backward in time (thus must not be valid if this is a trail)
-linearTime :: (Lat a, Lon a, Time a) => Trail a -> Trail a
+linearTime :: (Lon a, Lat a, Time a) => [a] -> [a]
 linearTime [] = []
 linearTime (p:ps) = go (getUTCTime p) ps
   where
   go _ [] = []
   go t (p:ps) = if getUTCTime p < t then go t ps else p : go (getUTCTime p) ps
+
+-- |Filter out all points that result in a speed greater than a given
+-- value (the second point is dropped)
+filterByMaxSpeed :: (Lat loc, Lon loc, Time loc) => Speed -> Trail loc -> Trail loc
+filterByMaxSpeed mx xs =
+	let ss = zipWith speed xs (drop 1 xs)
+	    fs = filter ((< Just mx) . fst) (zip ss $ drop 1 xs)
+	in take 1 xs ++ map snd fs
 
 -- |Creates a list of trails all of which are within the given distance of each
 -- other spanning atleast the given amount of time.
@@ -279,7 +412,7 @@ takeWhileLast p (x:xs)
 -- |Returns the closest distance between two trails (or Nothing if a trail is empty)
 -- O( (n * m) * log (n * m) )
 closestDistance :: (Lat a, Lon a) => Trail a -> Trail a -> Maybe Distance
-closestDistance as bs = listToMaybe $ sort [distance a b | a <- as, b <- bs]
+closestDistance as bs = listToMaybe $ L.sort [distance a b | a <- as, b <- bs]
 
 
 -- |@divideArea vDist hDist nw se@ divides an area into a grid of equally
