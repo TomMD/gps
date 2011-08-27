@@ -34,9 +34,8 @@ module Data.GPS
        , slidingAverageSpeed
        , transformTrail
        , groupPoints
-       , restLocations
+       , filterPoints
        , closestDistance
-       , filterByMaxSpeed
        , convexHull
          -- * Other helpers
        , readGPX
@@ -44,11 +43,11 @@ module Data.GPS
        , module Data.Geo.GPX
        ) where
 
-import Data.Function (on)
+import Data.Function (on,fix)
 import Data.Ord (comparing)
 import Data.List as L (sort, mapAccumL, minimumBy, maximumBy, sortBy)
 import Data.Maybe
-import Data.Geo.GPX hiding (none, cmt)
+import Data.Geo.GPX hiding (none, cmt,fix)
 import Text.Show.Functions ()
 
 import Text.XML.HXT.Arrow
@@ -233,10 +232,9 @@ toRadians = (*) (pi / 180)
 
 data TrailTransformation c
      = LinearTime
-     | MaxSpeed Speed
-     | ElimRestLocations Distance NominalDiffTime
      | BezierCurve (PointGrouping c)
      | TransformBy ([c] -> [c])
+     | FilterBy (PointGrouping c)
      deriving (Show)
               
 data PointGrouping c
@@ -256,6 +254,7 @@ data PointGrouping c
                                        -- grouping, chunking points
                                        -- into groups spanning at most
                                        -- the given time interval
+  | EveryNPoints Int                   -- ^ chunk the trail into groups of N points
   | IntersectionOf [PointGrouping c]   -- ^ intersects the given groupings
   | GroupBy ( [c] -> [Selected [c]] )  -- ^ Custom (user defined) grouping
   | InvertSelection (PointGrouping c)  -- ^ Inverts the selected/nonselected segments of a grouping
@@ -265,6 +264,7 @@ data PointGrouping c
     deriving (Show)
              
 data Selected a = Select {unSelect :: a} | NotSelect {unSelect :: a}
+  deriving (Eq, Ord, Show)
 
 isSelect :: Selected a -> Bool
 isSelect (Select _) = True
@@ -356,9 +356,13 @@ groupPoints (UnionOf gs) ps =
 groupPoints (FirstGrouping g) ps = let ps' = groupPoints g ps in take 1 ps' ++ map (NotSelect . unSelect) (drop 1 ps')
 groupPoints (LastGrouping g) ps  = let ps' = reverse (groupPoints g ps) in reverse $ take 1 ps' ++ map (NotSelect . unSelect) (drop 1 ps')
 groupPoints (GroupBy f) ps = f ps
+groupPoints (EveryNPoints n) ps =
+  (fix (\k xs -> if null xs then [Select xs] else let (f,s) = splitAt n xs in Select f : k s)) ps
 
-filterPoints :: (Lat a, Lon a, Time a) => PointGrouping a -> Trail a -> [Trail a]
-filterPoints = error "FIXME, implement me"
+filterPoints :: (Lat a, Lon a, Time a) => PointGrouping a -> Trail a -> Trail a
+filterPoints g ps = 
+  let gs = groupPoints g ps
+  in concatMap unSelect . filter isSelect $ gs
 
 mkTimePair :: (Lat a, Lon a, Time a) => Trail a -> [(a,UTCTime)]
 mkTimePair xs =
@@ -392,9 +396,11 @@ interpolate c1 c2 w =
       v = (h, d * (1 - w))
   in addVector v c1
 
+-- | Trail transformations are intended as a post-processing step that
+-- will remove or normalize waypoints.
 transformTrail :: (Lat a, Lon a, Time a) => TrailTransformation a -> Trail a -> Trail a
 transformTrail LinearTime ts = linearTime ts
-transformTrail (MaxSpeed x) ts = filterByMaxSpeed x ts
+transformTrail (FilterBy g) ts = filterPoints g ts
 transformTrail (BezierCurve grp) ts = concatMap (onSelected transformToBezierCurve) (groupPoints grp ts)
 transformTrail (TransformBy f) ts = linearTime (f ts)
 
@@ -405,38 +411,6 @@ linearTime (p:ps) = go (getUTCTime p) ps
   where
   go _ [] = []
   go t (p:ps) = if getUTCTime p < t then go t ps else p : go (getUTCTime p) ps
-
--- |Filter out all points that result in a speed greater than a given
--- value (the second point is dropped)
-filterByMaxSpeed :: (Lat loc, Lon loc, Time loc) => Speed -> Trail loc -> Trail loc
-filterByMaxSpeed mx xs =
-	let ss = zipWith speed xs (drop 1 xs)
-	    fs = filter ((< Just mx) . fst) (zip ss $ drop 1 xs)
-	in take 1 xs ++ map snd fs
-
--- |Creates a list of trails all of which are within the given distance of each
--- other spanning atleast the given amount of time.
---
--- For example @restLocations 50 600@
--- would return lists of all points that are within 50 meters of each other and
--- span at least 10 minutes (600 seconds).
---
--- Note this gives points within fifty meters of the earliest point - wandering
--- in a rest area with a 50 meter radius could result in several rest points
--- ([a,b..]) or even none if the distance between individual points exceeds 50m.
-restLocations :: (Lat a, Lon a, Time a) => Distance -> NominalDiffTime -> Trail a -> [Trail a]
-restLocations d s xs = go xs
-  where
-  go [] = []
-  go (a:as) =
-	case takeWhileLast ((<=) d . distance a) as of
-		(Just l, close, far) ->
-			case (getUTCTime a, getUTCTime l) of
-				(Just t1, Just t2) ->
-					let diff = diffUTCTime t2 t1
-					in if diff >= s then (a:close) : go far else go as
-				_ -> go as
-		_ -> go as
 
 takeWhileLast :: (a -> Bool) -> [a] -> (Maybe a, [a], [a])
 takeWhileLast p [] = (Nothing, [], [])
