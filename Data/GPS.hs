@@ -39,6 +39,7 @@ module Data.GPS
        , convexHull
          -- * Other helpers
        , readGPX
+       , writeGPX
        , readGPXSegments
        , module Data.Geo.GPX
        ) where
@@ -446,6 +447,15 @@ divideArea vDist hDist nw se =
 -- tracks, segments, and points ('trkpts', 'trksegs', 'trks') into a single 'Trail'.
 readGPX :: FilePath -> IO (Trail WptType)
 readGPX = liftM (concatMap trkpts . concatMap trksegs . concatMap trks) . readGpxFile
+
+writeGPX :: FilePath -> Trail WptType -> IO ()
+writeGPX fp ps = writeGpxFile fp $ gpx $ gpxType "" "" Nothing [] [] [trkType Nothing Nothing Nothing Nothing [] Nothing Nothing Nothing [trksegType ps Nothing]] Nothing
+
+-- writeGpxFile should go in the GPX package
+writeGpxFile :: FilePath -> Gpx -> IO ()
+writeGpxFile fp gpx = runX_ (constA gpx >>> xpickleDocument (xpickle :: PU Gpx) [] fp)
+
+runX_ t = runX t >> return ()
 
 readGPXSegments :: FilePath -> IO [Trail WptType]
 readGPXSegments = liftM (map (concatMap trkpts) . map trksegs . concatMap trks) . readGpxFile
