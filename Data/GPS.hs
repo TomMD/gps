@@ -252,9 +252,16 @@ data PointGrouping c
                                        -- coordinates were within a
                                        -- given distance for at least
                                        -- a particular amount of time.
-  | SpansTime NominalDiffTime -- ^ Perhaps the most trivial grouping, chunking points into groups spanning at most the given time interval
-  | IntersectionOf [PointGrouping c] -- ^ intersects the given groupings
-  | GroupBy ( [c] -> [Selected [c]] )
+  | SpansTime NominalDiffTime          -- ^ Perhaps the most trivial
+                                       -- grouping, chunking points
+                                       -- into groups spanning at most
+                                       -- the given time interval
+  | IntersectionOf [PointGrouping c]   -- ^ intersects the given groupings
+  | GroupBy ( [c] -> [Selected [c]] )  -- ^ Custom (user defined) grouping
+  | InvertSelection (PointGrouping c)  -- ^ Inverts the selected/nonselected segments of a grouping
+  | FirstGrouping (PointGrouping c)    -- ^ Only the first segment is 'Select'ed, and only if it was originally Selected by the contained grouping
+  | LastGrouping (PointGrouping c)     -- ^ Only the last segment, if any, is selected
+  | UnionOf [PointGrouping c]          -- ^ Union all the groupings
     deriving (Show)
              
 data Selected a = Select {unSelect :: a} | NotSelect {unSelect :: a}
@@ -273,6 +280,14 @@ onSelected _ (NotSelect a) = a
 instance Functor Selected where
   fmap f (Select x) = Select $ f x
   fmap f (NotSelect x) = NotSelect $ f x
+
+dropExact :: Int -> [Selected [a]] -> [Selected [a]]
+dropExact i [] = []
+dropExact i (x:xs) =
+  case compare (selLength x) i of
+    EQ -> xs
+    LT -> dropExact (i - selLength x) xs
+    GT -> fmap (drop i) x : xs
 
 -- Grouping point _does not_ result in deleted points. It is always true that:
 --
@@ -315,9 +330,6 @@ groupPoints (SpansTime n) ps =
   in map (Select . map fst) $ chunk times
 groupPoints (IntersectionOf gs) ps =
   let groupings = map (flip groupPoints ps) gs
-      dropExact :: Int -> [Selected [a]] -> [Selected [a]]
-      dropExact i [] = []
-      dropExact i (x:xs) = if selLength x == 0 then xs else fmap (drop i) x : xs
       -- chunk :: [[Selected [pnts]]] -> pnts -> [pnts]
       chunk _ [] = []
       chunk ggs xs = 
@@ -326,6 +338,23 @@ groupPoints (IntersectionOf gs) ps =
             (c,rest) = splitAt minLen xs
         in sel c : chunk (filter (not . null) $ map (dropExact minLen) ggs) rest
   in chunk groupings ps
+groupPoints (InvertSelection g) ps = map (\s -> if isSelect s then NotSelect (unSelect s) else s) (groupPoints g ps)
+groupPoints (UnionOf gs) ps =
+  let groupings = map (flip groupPoints ps) gs
+      chunk _ [] = []
+      chunk ggs xs =
+        let getSegs = concatMap (take 1)
+            segs = getSegs ggs
+            len =
+              if any isSelect segs
+                 then max 1 . maximum . getSegs . map (map selLength) . map (filter isSelect) $ ggs
+                 else max 1 . minimum . getSegs . map (map selLength) $ ggs
+            sel = if any isSelect segs then Select else NotSelect
+            (c,rest) = splitAt len xs
+        in sel c : chunk (filter (not . null) $ map (dropExact len) ggs) rest
+  in chunk groupings ps
+groupPoints (FirstGrouping g) ps = let ps' = groupPoints g ps in take 1 ps' ++ map (NotSelect . unSelect) (drop 1 ps')
+groupPoints (LastGrouping g) ps  = let ps' = reverse (groupPoints g ps) in reverse $ take 1 ps' ++ map (NotSelect . unSelect) (drop 1 ps')
 groupPoints (GroupBy f) ps = f ps
 
 filterPoints :: (Lat a, Lon a, Time a) => PointGrouping a -> Trail a -> [Trail a]
@@ -348,8 +377,7 @@ transformToBezierCurve xs =
   in if null times
       then xs
       else map (bezierPoint xs) queryTimes
-  where
-    
+
 bezierPoint :: (Lat a, Lon a) => [a] -> Double -> a
 bezierPoint []   _ = error "Can not create a bezier point from an empty list"
 bezierPoint [p0] _ = p0
