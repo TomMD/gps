@@ -5,6 +5,10 @@ module Data.GPS.Trail
        , PointGrouping(..)
        , TrailTransformation(..)
        , Selected(..)
+         -- * Utility Functions
+       , isSelected
+       , onSelected
+       , selLength
          -- * Trail Functions
        , totalDistance
        , avgSpeeds
@@ -122,15 +126,21 @@ data PointGrouping c
   | FirstGrouping (PointGrouping c)    -- ^ Only the first segment is 'Select'ed, and only if it was originally Selected by the contained grouping
   | LastGrouping (PointGrouping c)     -- ^ Only the last segment, if any, is selected
   | UnionOf [PointGrouping c]          -- ^ Union all the groupings
+  | RefineGrouping (PointGrouping c) (PointGrouping c) 
+                  -- ^ For every selected group, refine the selection
+                  -- using the second grouping method.  This differs
+                  -- from 'IntersectionOf' by restarting the second
+                  -- grouping algorithm at the beginning each group
+                  -- selected by the first algorithm.
     deriving (Show)
              
 -- | When grouping points, lists of points are either marked as 'Select' or 'NotSelect'.
 data Selected a = Select {unSelect :: a} | NotSelect {unSelect :: a}
   deriving (Eq, Ord, Show)
 
-isSelect :: Selected a -> Bool
-isSelect (Select _) = True
-isSelect _ = False
+isSelected :: Selected a -> Bool
+isSelected (Select _) = True
+isSelected _ = False
 
 selLength :: Selected [a] -> Int
 selLength = length . unSelect
@@ -196,11 +206,11 @@ groupPoints (IntersectionOf gs) ps =
       chunk _ [] = []
       chunk ggs xs = 
         let minLen = max 1 . minimum . concatMap (take 1) $ map (map selLength) ggs   -- FIXME this is all manner of broken
-            sel = if all isSelect (concatMap (take 1) ggs) then Select else NotSelect
+            sel = if all isSelected (concatMap (take 1) ggs) then Select else NotSelect
             (c,rest) = splitAt minLen xs
         in sel c : chunk (filter (not . null) $ map (dropExact minLen) ggs) rest
   in chunk groupings ps
-groupPoints (InvertSelection g) ps = map (\s -> if isSelect s then NotSelect (unSelect s) else s) (groupPoints g ps)
+groupPoints (InvertSelection g) ps = map (\s -> if isSelected s then NotSelect (unSelect s) else s) (groupPoints g ps)
 groupPoints (UnionOf gs) ps =
   let groupings = map (flip groupPoints ps) gs
       chunk _ [] = []
@@ -208,23 +218,26 @@ groupPoints (UnionOf gs) ps =
         let getSegs = concatMap (take 1)
             segs = getSegs ggs
             len =
-              if any isSelect segs
-                 then max 1 . maximum . getSegs . map (map selLength) . map (filter isSelect) $ ggs
+              if any isSelected segs
+                 then max 1 . maximum . getSegs . map (map selLength) . map (filter isSelected) $ ggs
                  else max 1 . minimum . getSegs . map (map selLength) $ ggs
-            sel = if any isSelect segs then Select else NotSelect
+            sel = if any isSelected segs then Select else NotSelect
             (c,rest) = splitAt len xs
         in sel c : chunk (filter (not . null) $ map (dropExact len) ggs) rest
   in chunk groupings ps
 groupPoints (FirstGrouping g) ps = let ps' = groupPoints g ps in take 1 ps' ++ map (NotSelect . unSelect) (drop 1 ps')
 groupPoints (LastGrouping g) ps  = let ps' = reverse (groupPoints g ps) in reverse $ take 1 ps' ++ map (NotSelect . unSelect) (drop 1 ps')
 groupPoints (GroupBy f) ps = f ps
-groupPoints (EveryNPoints n) ps =
+groupPoints (EveryNPoints n) ps
+  | n <= 0 = NotSelect ps
+  | otherwise =
   (fix (\k xs -> if null xs then [Select xs] else let (f,s) = splitAt n xs in Select f : k s)) ps
+groupPoints (RefineGrouping a b) ps = map (onSelected (groupPoints b) . groupPoints a
 
 filterPoints :: (Lat a, Lon a, Time a) => PointGrouping a -> Trail a -> Trail a
 filterPoints g ps = 
   let gs = groupPoints g ps
-  in concatMap unSelect . filter isSelect $ gs
+  in concatMap unSelect . filter isSelected $ gs
 
 mkTimePair :: (Lat a, Lon a, Time a) => Trail a -> [(a,UTCTime)]
 mkTimePair xs =
