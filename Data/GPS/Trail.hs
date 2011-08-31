@@ -24,12 +24,14 @@ module Data.GPS.Trail
        , restLocations
        , spansTime
        , everyNPoints
+         -- ** Group Transformations 
        , intersectionOf
        , invertSelection
        , firstGrouping
        , lastGrouping
        , unionOf
        , refineGrouping
+       , (/\), (\/)
          -- ** Composite Operations (Higher Level)
        , smoothStoppedPoints
          ) where
@@ -231,12 +233,49 @@ unionOf gs ps =
   in chunk groupings ps
      
 -- | Intersection binary operator
-(/\) :: Selected (Trail a) -> TransformGrouping a
-(/\) a b = undefined
+(/\) :: [Selected (Trail a)] -> TransformGrouping a
+(/\) xs [] = []
+(/\) [] ys = []
+(/\) xsL@(Select x:xs) ysL@(Select y:ys) =
+  let z = if length x < length y then x else y
+      xs' = selListDrop (length z) xsL
+      ys' = selListDrop (length z) ysL
+  in Select z : (xs' /\ ys')
+(/\) xs (NotSelect y:ys) = NotSelect y : (selListDrop (length y) xs /\ ys)
+(/\) (NotSelect x:xs) ys = NotSelect x : (xs /\ selListDrop (length x) ys)
 
 -- | Union binary operator
-(\/) :: Selected (Trail a) -> TransformGrouping a
-(\/) a b = undefined
+(\/) :: [Selected (Trail a)] -> TransformGrouping a
+(\/) xs [] = xs
+(\/) [] ys = ys
+(\/) (Select x:xs) (Select y : ys) =
+  let xLen = length x
+      yLen = length y
+  in if xLen < yLen
+       then (Select y :) (selListDrop (yLen - xLen) xs \/ ys)
+       else (Select x :) (xs \/ selListDrop (xLen - yLen) ys)
+(\/) (Select x:xs) ys = Select x : selListDrop (length x) ys
+(\/) xs (Select y:ys) = Select y : selListDrop (length y) xs
+(\/) xsL@(NotSelect x:xs) ysL@(NotSelect y:ys) =
+  let xLen = length x
+      yLen = length y
+  in if xLen < yLen
+        then (NotSelect x:) (xs \/ selListDrop xLen ysL)
+        else (NotSelect y:) (selListDrop yLen xsL \/ ys)
+      
+selListTake :: Int -> [Selected [a]] -> [Selected [a]]
+selListTake 0 _ = []
+selListTake n [] = []
+selListTake n (x:xs) =
+  let x' = take n (unSelect x)
+  in fmap (const x') x : selListTake (n - length x') xs
+
+selListDrop :: Int -> [Selected [a]] -> [Selected [a]]
+selListDrop 0 xs = xs
+selListDrop n [] = []
+selListDrop n (x:xs) =
+  let x' = drop n (unSelect x)
+  in fmap (const x') x : selListDrop (n - (selLength x - length x')) xs
 
 -- |Inverts the selected/nonselected segments
 invertSelection :: (Lat a, Lon a, Time a) => TransformGrouping a
