@@ -2,22 +2,36 @@
 module Data.GPS.Trail
        ( -- * Types         
          AvgMethod(..)
-       , PointGrouping(..)
-       , TrailTransformation(..)
        , Selected(..)
          -- * Utility Functions
        , isSelected
+       , isNotSelected
        , onSelected
        , selLength
          -- * Trail Functions
+         -- ** Queries
        , totalDistance
        , avgSpeeds
        , slidingAverageSpeed
-       , transformTrail
-       , groupPoints
-       , filterPoints
        , closestDistance
        , convexHull
+         -- ** Transformations
+       , bezierCurve
+       , linearTime
+       , filterPoints
+         -- ** Grouping Methods
+       , betweenSpeeds
+       , restLocations
+       , spansTime
+       , everyNPoints
+       , intersectionOf
+       , invertSelection
+       , firstGrouping
+       , lastGrouping
+       , unionOf
+       , refineGrouping
+         -- ** Composite Operations (Higher Level)
+       , smoothStoppedPoints
          ) where
 
 import Text.Show.Functions ()
@@ -44,14 +58,14 @@ takeWhileEnd p xs = go xs Nothing
     | p a = let (e',xs,zs) = go as (Just a) in (e',a:xs,zs)
     | otherwise = (e,[], a:as)
 
-data AvgMethod
+data AvgMethod c
   = AvgMean              -- ^ Obtain the 'mean' of the considered points
   | AvgHarmonicMean      -- ^ Obtain the 'harmonicMean'
   | AvgGeometricMean     -- ^ Obtain the 'geometricMean'
   | AvgMedian            -- ^ Obtain the median of the considered points
   | AvgEndPoints         -- ^ Compute the speed considering only the given endpoints
-  | AvgMinOf [AvgMethod] -- ^ Take the minimum of the speeds from the given methods
-  | AvgWith ([(LatitudeType,LongitudeType)] -> Speed)
+  | AvgMinOf [AvgMethod c] -- ^ Take the minimum of the speeds from the given methods
+  | AvgWith ([c] -> Speed)
     
 -- | @avgSpeeds n points@
 -- Average speed using a window of up to @n@ seconds and averaging by taking the
@@ -62,7 +76,7 @@ avgSpeeds = slidingAverageSpeed AvgHarmonicMean
 -- | @slidingAverageSpeed m n@ Average speed using a moving window of up to @n@ seconds
 -- and an 'AvgMethod' of @m@.
 slidingAverageSpeed :: (Lat a, Lon a, Time a) => 
-                       AvgMethod -> NominalDiffTime -> Trail a -> [(UTCTime, Speed)]
+                       AvgMethod a -> NominalDiffTime -> Trail a -> [(UTCTime, Speed)]
 slidingAverageSpeed _ _ [] = []
 slidingAverageSpeed m n (x:xs) =
     let avg = getAvg (x:xs') m
@@ -90,50 +104,27 @@ slidingAverageSpeed m n (x:xs) =
              else if odd len then ss' V.! mid else mean (V.slice mid 2 ss')
         AvgEndPoints -> fromMaybe 0 . join . fmap (speed x) $ e
         AvgMinOf as -> minimum $ map (getAvg cs) as
-        AvgWith f -> f (map getDMSPair cs)
+        AvgWith f -> f cs
   getAvgTime a b = liftM2 addUTCTime (getTimeDiff b a) (getUTCTime a)
   getSpeedsV = V.fromList . getSpeeds
   getSpeeds zs = concatMap (maybeToList . uncurry speed) $ zip zs (drop 1 zs)
 
-data TrailTransformation c
-     = LinearTime
-     | BezierCurve (PointGrouping c)
-     | TransformBy ([c] -> [c])
-     | FilterBy (PointGrouping c)
-     deriving (Show)
-              
-data PointGrouping c
-  = BetweenSpeeds Speed Speed  -- ^ Groups trail segments into
-                               -- contiguous points within the speed
-                               -- and all others outside of the speed.
-                               -- The "speed" from point p(i) to p(i+1) is
-                               -- associated with p(i) (execpt for the
-                               -- first speed value, which is
-                               -- associated with both the first and
-                               -- second point)
-  | RestPoint Distance NominalDiffTime -- ^ A "rest point" means the
-                                       -- coordinates were within a
-                                       -- given distance for at least
-                                       -- a particular amount of time.
-  | SpansTime NominalDiffTime          -- ^ Perhaps the most trivial
-                                       -- grouping, chunking points
-                                       -- into groups spanning at most
-                                       -- the given time interval
-  | EveryNPoints Int                   -- ^ chunk the trail into groups of N points
-  | IntersectionOf [PointGrouping c]   -- ^ intersects the given groupings
-  | GroupBy ( [c] -> [Selected [c]] )  -- ^ Custom (user defined) grouping
-  | InvertSelection (PointGrouping c)  -- ^ Inverts the selected/nonselected segments of a grouping
-  | FirstGrouping (PointGrouping c)    -- ^ Only the first segment is 'Select'ed, and only if it was originally Selected by the contained grouping
-  | LastGrouping (PointGrouping c)     -- ^ Only the last segment, if any, is selected
-  | UnionOf [PointGrouping c]          -- ^ Union all the groupings
-  | RefineGrouping (PointGrouping c) (PointGrouping c) 
-                  -- ^ For every selected group, refine the selection
-                  -- using the second grouping method.  This differs
-                  -- from 'IntersectionOf' by restarting the second
-                  -- grouping algorithm at the beginning each group
-                  -- selected by the first algorithm.
-    deriving (Show)
-             
+type TrailTransformation c = [Selected (Trail c)] -> Trail c
+
+-- | A PointGrouping is a function that selects segments of a trail.
+-- 
+-- Grouping point _does not_ result in deleted points. It is always true that:
+--
+--     forall g : PointGrouping c -->
+--     concatMap unSelect (g ts) == ts
+--
+-- The purpose of grouping is usually for later processing.  Any desire to drop
+-- points that didn't meet a particular grouping criteria can be filled with
+-- a composition with 'filter' (or directly via 'filterPoints'.
+type PointGrouping c = Trail c -> [Selected (Trail c)]
+
+type TransformGrouping c = [Selected (Trail c)] -> [Selected (Trail c)]
+
 -- | When grouping points, lists of points are either marked as 'Select' or 'NotSelect'.
 data Selected a = Select {unSelect :: a} | NotSelect {unSelect :: a}
   deriving (Eq, Ord, Show)
@@ -142,12 +133,15 @@ isSelected :: Selected a -> Bool
 isSelected (Select _) = True
 isSelected _ = False
 
+isNotSelected :: Selected a -> Bool
+isNotSelected = not . isSelected
+
 selLength :: Selected [a] -> Int
 selLength = length . unSelect
 
-onSelected :: (a -> a) -> Selected a -> a
-onSelected f (Select a) = f a
-onSelected _ (NotSelect a) = a
+onSelected :: (a -> b) -> (a -> b) -> Selected a -> b
+onSelected f _ (Select a) = f a
+onSelected _ g (NotSelect a) = g a
 
 instance Functor Selected where
   fmap f (Select x) = Select $ f x
@@ -161,15 +155,12 @@ dropExact i (x:xs) =
     LT -> dropExact (i - selLength x) xs
     GT -> fmap (drop i) x : xs
 
--- Grouping point _does not_ result in deleted points. It is always true that:
---
---     concat (groupPoints x ts) == ts -- forall x
---
--- The purpose of grouping is usually for later processing.  Any desire to drop
--- points that didn't meet a particular grouping criteria can be filled with
--- a composition with 'filter' (or directly via 'filterPoints'.
-groupPoints :: (Lat a, Lon a, Time a) => PointGrouping a -> Trail a -> [Selected (Trail a)]
-groupPoints (BetweenSpeeds low hi) ps =
+-- | Groups trail segments into contiguous points within the speed
+-- and all others outside of the speed.  The "speed" from point p(i)
+-- to p(i+1) is associated with p(i) (execpt for the first speed
+-- value, which is associated with both the first and second point)
+betweenSpeeds :: (Lat a, Lon a, Time a) => Double -> Double -> PointGrouping a
+betweenSpeeds low hi ps =
   let spds = concatMap maybeToList $ zipWith speed ps (drop 1 ps)
       psSpds = [(p,s) | p <- ps, s <- maybeToList (listToMaybe spds) ++ spds]
       inRange x = x >= low && x <= hi
@@ -179,7 +170,11 @@ groupPoints (BetweenSpeeds low hi) ps =
             (r,rest) = op (inRange . snd) xs
         in r : chunk xs
   in map (fmap (map fst)) $ chunk psSpds
-groupPoints (RestPoint d s) ps =
+
+-- | A "rest point" means the coordinates remain within a given distance
+-- for at least a particular amount of time.
+restLocations :: (Lat a, Lon a, Time a) => Distance -> NominalDiffTime -> PointGrouping a
+restLocations d s ps =
   let consToFirst x [] = [NotSelect [x]]
       consToFirst x (a:as) = (fmap (x:) a) : as
       go [] [] = []
@@ -194,14 +189,21 @@ groupPoints (RestPoint d s) ps =
               _ -> consToFirst a $ go as nonRests
           _ -> consToFirst a $ go as nonRests
   in go ps []
-groupPoints (SpansTime n) ps =
+     
+-- |chunking points into groups spanning at most the given time
+-- interval.
+spansTime :: (Lat a, Lon a, Time a) => NominalDiffTime -> PointGrouping a
+spansTime n ps =
   let times  = mkTimePair ps
       chunk [] = []
       chunk (x:xs) =
         let (good,rest) = span ((<= addUTCTime n (snd x)) . snd) xs in good : chunk rest
   in map (Select . map fst) $ chunk times
-groupPoints (IntersectionOf gs) ps =
-  let groupings = map (flip groupPoints ps) gs
+
+-- | intersects the given groupings
+intersectionOf :: (Lat a, Lon a, Time a) => [PointGrouping a] -> PointGrouping a
+intersectionOf gs ps =
+  let groupings = map ($ ps) gs
       -- chunk :: [[Selected [pnts]]] -> pnts -> [pnts]
       chunk _ [] = []
       chunk ggs xs = 
@@ -210,9 +212,11 @@ groupPoints (IntersectionOf gs) ps =
             (c,rest) = splitAt minLen xs
         in sel c : chunk (filter (not . null) $ map (dropExact minLen) ggs) rest
   in chunk groupings ps
-groupPoints (InvertSelection g) ps = map (\s -> if isSelected s then NotSelect (unSelect s) else s) (groupPoints g ps)
-groupPoints (UnionOf gs) ps =
-  let groupings = map (flip groupPoints ps) gs
+
+-- | Union all the groupings
+unionOf :: (Lat a, Lon a, Time a) => [PointGrouping a] -> PointGrouping a
+unionOf gs ps =
+  let groupings = map ($ ps) gs
       chunk _ [] = []
       chunk ggs xs =
         let getSegs = concatMap (take 1)
@@ -225,19 +229,46 @@ groupPoints (UnionOf gs) ps =
             (c,rest) = splitAt len xs
         in sel c : chunk (filter (not . null) $ map (dropExact len) ggs) rest
   in chunk groupings ps
-groupPoints (FirstGrouping g) ps = let ps' = groupPoints g ps in take 1 ps' ++ map (NotSelect . unSelect) (drop 1 ps')
-groupPoints (LastGrouping g) ps  = let ps' = reverse (groupPoints g ps) in reverse $ take 1 ps' ++ map (NotSelect . unSelect) (drop 1 ps')
-groupPoints (GroupBy f) ps = f ps
-groupPoints (EveryNPoints n) ps
-  | n <= 0 = NotSelect ps
+     
+-- | Intersection binary operator
+(/\) :: Selected (Trail a) -> TransformGrouping a
+(/\) a b = undefined
+
+-- | Union binary operator
+(\/) :: Selected (Trail a) -> TransformGrouping a
+(\/) a b = undefined
+
+-- |Inverts the selected/nonselected segments
+invertSelection :: (Lat a, Lon a, Time a) => TransformGrouping a
+invertSelection = map (onSelected NotSelect Select)
+
+-- |@firstGrouping f ps@ only the first segment remains 'Select'ed, and only
+-- if it was already selected by @f@.
+firstGrouping ::  (Lat a, Lon a, Time a) => TransformGrouping a
+firstGrouping ps = take 1 ps ++ map (NotSelect . unSelect) (drop 1 ps)
+
+-- | Only the last segment, if any, is selected (note: the current
+-- implementation is inefficient, using 'reverse')
+lastGrouping ::  TransformGrouping a
+lastGrouping ps  = let ps' = reverse ps in reverse $ take 1 ps' ++ map (NotSelect . unSelect) (drop 1 ps')
+
+-- | chunk the trail into groups of N points
+everyNPoints ::  (Lat a, Lon a, Time a) => Int -> PointGrouping a
+everyNPoints n ps
+  | n <= 0 = [NotSelect ps]
   | otherwise =
   (fix (\k xs -> if null xs then [Select xs] else let (f,s) = splitAt n xs in Select f : k s)) ps
-groupPoints (RefineGrouping a b) ps = map (onSelected (groupPoints b) . groupPoints a
+  
+-- |For every selected group, refine the selection using the second
+-- grouping method.  This differs from 'IntersectionOf' by restarting
+-- the second grouping algorithm at the beginning each group selected
+-- by the first algorithm.
+refineGrouping ::  (Lat a, Lon a, Time a) => PointGrouping a -> TransformGrouping a
+refineGrouping b = concatMap (onSelected b (\x -> [NotSelect x]))
 
+-- |Remove all points that remain 'NotSelect'ed by the given grouping algorithm.
 filterPoints :: (Lat a, Lon a, Time a) => PointGrouping a -> Trail a -> Trail a
-filterPoints g ps = 
-  let gs = groupPoints g ps
-  in concatMap unSelect . filter isSelected $ gs
+filterPoints g = concatMap unSelect . filter isSelected . g
 
 mkTimePair :: (Lat a, Lon a, Time a) => Trail a -> [(a,UTCTime)]
 mkTimePair xs =
@@ -262,13 +293,12 @@ bezierPoint []   _ = error "Can not create a bezier point from an empty list"
 bezierPoint [p0] _ = p0
 bezierPoint ps t   = interpolate (bezierPoint (init ps) t) (bezierPoint (tail ps) t) t
 
--- | Trail transformations are intended as a post-processing step that
--- will remove or normalize waypoints.
-transformTrail :: (Lat a, Lon a, Time a) => TrailTransformation a -> Trail a -> Trail a
-transformTrail LinearTime ts = linearTime ts
-transformTrail (FilterBy g) ts = filterPoints g ts
-transformTrail (BezierCurve grp) ts = concatMap (onSelected transformToBezierCurve) (groupPoints grp ts)
-transformTrail (TransformBy f) ts = linearTime (f ts)
+-- |Interpolate selected points onto a bezier curve.  Note this gets
+-- exponentially more expensive with the length of the segement being
+-- transformed - it is not advisable to perform this operation on
+-- trail segements with more than ten points!
+bezierCurve ::  (Lat a, Lon a, Time a) => [Selected (Trail a)] -> Trail a
+bezierCurve = concatMap (onSelected transformToBezierCurve Prelude.id)
 
 -- |Filters out any points that go backward in time (thus must not be
 -- valid if this is a trail)
@@ -328,3 +358,12 @@ turn a b c =
 southMost :: (Lat c) => [c] -> Maybe c
 southMost []  = Nothing
 southMost cs = Just . minimumBy (comparing lat) $ cs
+
+---------- COMPOSIT OPERATIONS ---------------
+-- These operations are simply implemented using the previously
+-- defined functions. They can serve either for concise use for novice
+-- users or as instructional examples.
+------------------------------------------
+
+smoothStoppedPoints :: (Lat a, Lon a, Time a) => Trail a -> Trail a
+smoothStoppedPoints = bezierCurve . refineGrouping (everyNPoints 8) . restLocations 30 60
