@@ -15,6 +15,7 @@ module Data.GPS.Core
        , heading
        , distance
        , speed
+       , getVector
        , addVector
        , getRadianPair
        , getDMSPair
@@ -55,11 +56,12 @@ type Trail a = [a]
 getUTCTime :: (Lat a, Lon a, Time a) => a -> Maybe UTCTime
 getUTCTime = fmap toUTCTime . time
 
+acos' x = if x > 1 then acos 1 else if x < (-1) then acos (-1) else acos x
+
 distance :: (Lat a, Lon a, Lat b, Lon b) => a -> b -> Distance
 distance a b =
 	let x  = sin lat1 * sin lat2 + cos lat1 * cos lat2 * cos (lon2 - lon1)
-	    x' = if x > 1 then 1 else x
-	in radiusOfEarth * acos x'
+	in radiusOfEarth * acos' x
  where
   (lat1, lon1) = getRadianPairD a
   (lat2, lon2) = getRadianPairD b
@@ -76,6 +78,24 @@ heading a b =
 
 getVector :: (Lat a, Lon a, Lat b, Lon b) => a -> b -> Vector
 getVector a b = (distance a b, heading a b)
+
+-- |Given a vector and coordinate, computes a new coordinate.
+-- Within some epsilon it should hold that if
+--
+-- 	@dest = addVector (dist,heading) start@
+--
+-- then
+--
+-- 	@heading == heading start dest@
+-- 	
+-- 	@dist    == distance start dest@
+addVector :: (Lat c, Lon c) => Vector -> c -> c
+addVector (d,h) p = setLon (longitudeType $ toDegrees lon2) 
+                  . setLat (latitudeType $ toDegrees lat2) $ p
+  where
+	(lat,lon) = getRadianPairD p
+	lat2 = lat + (cos h) * (d / radiusOfEarth)
+	lon2 = lon - acos' ( (cos (d/radiusOfEarth) - sin lat * sin lat2) / (cos lat * cos lat2))
 
 -- | Speed in meters per second, only if a 'Time' was recorded for each waypoint.
 speed :: (Lat loc, Lon loc, Time loc, Lat b, Lon b, Time b) => loc -> b -> Maybe Speed
@@ -106,24 +126,7 @@ east = (3 / 2) * pi
 west :: Heading
 west = pi / 2
 
-toDecimal = (*) (180 / pi)
-
--- |Given a vector and coordinate, computes a new coordinate.
--- Within some epsilon it should hold that if
---
--- 	@dest = addVector (dist,heading) start@
---
--- then
---
--- 	@heading == dmsHeading start dest@
--- 	
--- 	@dist    == distance start dest@
-addVector :: (Lat c, Lon c) => Vector -> c -> c
-addVector (d,h) p = setLon (longitudeType lon2) . setLat (latitudeType lat2) $ p
-  where
-	(lat,lon) = getRadianPairD p
-	lat2 = lat + (cos h) * (d / radiusOfEarth)
-	lon2 = lon + acos ( (cos (d/radiusOfEarth) - sin lat * sin lat2) / (cos lat * cos lat2))
+toDegrees = (*) (180 / pi)
 
 getRadianPairD :: (Lat c, Lon c) => c -> (Double,Double)
 getRadianPairD = (\(a,b) -> (realToFrac a, realToFrac b)) . getRadianPair
@@ -142,9 +145,11 @@ toRadians = (*) (pi / 180)
 -- between c1 and c2 equal to @c1 when @w == 0@ (weighted linearly
 -- toward c2).
 interpolate :: (Lat a, Lon a) => a -> a -> Double -> a
-interpolate c1 c2 w =
+interpolate c1 c2 w
+  | w < 0 || w > 1 = error "Interpolate only works with a weight between zero and one"
+  | otherwise = 
   let (h,d) = (heading c1 c2, distance c1 c2)
-      v = (h, d * (1 - w))
+      v = (d * w, h)
   in addVector v c1
      
 -- |@divideArea vDist hDist nw se@ divides an area into a grid of equally
@@ -166,7 +171,7 @@ readGPX :: FilePath -> IO (Trail WptType)
 readGPX = liftM (concatMap trkpts . concatMap trksegs . concatMap trks) . readGpxFile
 
 writeGPX :: FilePath -> Trail WptType -> IO ()
-writeGPX fp ps = writeGpxFile fp $ gpx $ gpxType "" "" Nothing [] [] [trkType Nothing Nothing Nothing Nothing [] Nothing Nothing Nothing [trksegType ps Nothing]] Nothing
+writeGPX fp ps = writeGpxFile fp $ gpx $ gpxType "1.0" "Haskell GPS Package (via the GPX package)" Nothing [] [] [trkType Nothing Nothing Nothing Nothing [] Nothing Nothing Nothing [trksegType ps Nothing]] Nothing
 
 -- writeGpxFile should go in the GPX package
 writeGpxFile :: FilePath -> Gpx -> IO ()
