@@ -16,7 +16,8 @@ module Data.GPS.Trail
        , closestDistance
        , convexHull
          -- ** Transformations
-       , bezierCurve
+       -- , bezierCurveAt
+       -- , bezierCurve
        , linearTime
        , filterPoints
          -- ** Grouping Methods
@@ -32,8 +33,10 @@ module Data.GPS.Trail
        , unionOf
        , refineGrouping
        , (/\), (\/)
-         -- ** Composite Operations (Higher Level)
-       , smoothStoppedPoints
+       --  -- ** Composite Operations (Higher Level)
+       -- , smoothRests
+       -- , smoothSegments
+       -- , smoothPath
          ) where
 
 import Text.Show.Functions ()
@@ -278,12 +281,12 @@ selListDrop n (x:xs) =
   in fmap (const x') x : selListDrop (n - (selLength x - length x')) xs
 
 -- |Inverts the selected/nonselected segments
-invertSelection :: (Lat a, Lon a, Time a) => TransformGrouping a
+invertSelection :: TransformGrouping a
 invertSelection = map (onSelected NotSelect Select)
 
 -- |@firstGrouping f ps@ only the first segment remains 'Select'ed, and only
 -- if it was already selected by @f@.
-firstGrouping ::  (Lat a, Lon a, Time a) => TransformGrouping a
+firstGrouping ::  TransformGrouping a
 firstGrouping ps = take 1 ps ++ map (NotSelect . unSelect) (drop 1 ps)
 
 -- | Only the last segment, if any, is selected (note: the current
@@ -292,52 +295,63 @@ lastGrouping ::  TransformGrouping a
 lastGrouping ps  = let ps' = reverse ps in reverse $ take 1 ps' ++ map (NotSelect . unSelect) (drop 1 ps')
 
 -- | chunk the trail into groups of N points
-everyNPoints ::  (Lat a, Lon a, Time a) => Int -> PointGrouping a
+everyNPoints ::  Int -> PointGrouping a
 everyNPoints n ps
   | n <= 0 = [NotSelect ps]
-  | otherwise =
-  (fix (\k xs -> if null xs then [Select xs] else let (f,s) = splitAt n xs in Select f : k s)) ps
+  | otherwise = go ps
+    where
+      go [] = []
+      go xs = let (h,t) = splitAt n xs in Select h : go t
   
 -- |For every selected group, refine the selection using the second
 -- grouping method.  This differs from 'IntersectionOf' by restarting
 -- the second grouping algorithm at the beginning each group selected
 -- by the first algorithm.
-refineGrouping ::  (Lat a, Lon a, Time a) => PointGrouping a -> TransformGrouping a
+refineGrouping ::  PointGrouping a -> TransformGrouping a
 refineGrouping b = concatMap (onSelected b (\x -> [NotSelect x]))
 
 -- |Remove all points that remain 'NotSelect'ed by the given grouping algorithm.
-filterPoints :: (Lat a, Lon a, Time a) => PointGrouping a -> Trail a -> Trail a
+filterPoints :: PointGrouping a -> Trail a -> Trail a
 filterPoints g = concatMap unSelect . filter isSelected . g
 
-mkTimePair :: (Lat a, Lon a, Time a) => Trail a -> [(a,UTCTime)]
+-- Extract the time from each coordinate.  If no time is available then
+-- the coordinate is dropped!
+mkTimePair :: (Time a) => Trail a -> [(a,UTCTime)]
 mkTimePair xs =
   let timesM = map (\x-> fmap (x,) $ getUTCTime x) xs
   in concatMap maybeToList timesM
 
-transformToBezierCurve :: (Lat a, Lon a, Time a) => Trail a -> Trail a
-transformToBezierCurve xs = 
-  let times = mkTimePair xs
-      end = last times
-      top = head times
-      sndDiff = diffUTCTime `on` snd
-      totalTime  = sndDiff end top
-      queryTimes = [fromTo (sndDiff end t / totalTime) | t <- times]
+-- |Construct a bezier curve using the provided trail.  Construct a
+-- new trail by sampling the given bezier curve at the given times.
+-- The current implementation assumes the times of the input
+-- coordinates are available and all equal (Ex: all points are 5
+-- seconds apart), the results will be poor if this is not the case!
+bezierCurveAt :: (Lat a, Lon a, Time a) => [UTCTime] -> Trail a -> Trail a
+bezierCurveAt selectedTimes xs = 
+  let timesDef = mkTimePair xs
+      end = last timesDef
+      top = head timesDef
+      totalTime  = diffUTCTime (snd end) (snd top)
+      times = if null selectedTimes then map snd timesDef else selectedTimes
+      queryTimes = [fromTo (diffUTCTime (snd end) t / totalTime) | t <- times]
       fromTo = fromRational . toRational
-  in if null times
+  in if null timesDef || totalTime == 0 || any (\x -> x < 0 || x > 1) queryTimes
       then xs
       else map (bezierPoint xs) queryTimes
 
 bezierPoint :: (Lat a, Lon a) => [a] -> Double -> a
-bezierPoint []   _ = error "Can not create a bezier point from an empty list"
-bezierPoint [p0] _ = p0
-bezierPoint ps t   = interpolate (bezierPoint (init ps) t) (bezierPoint (tail ps) t) t
+bezierPoint pnts t   = go pnts
+  where
+  go [] = error "GPS Package: Can not create a bezier point from an empty list"
+  go [p] = p
+  go ps = interpolate (go (init ps)) (go (tail ps)) t
 
 -- |Interpolate selected points onto a bezier curve.  Note this gets
 -- exponentially more expensive with the length of the segement being
 -- transformed - it is not advisable to perform this operation on
 -- trail segements with more than ten points!
 bezierCurve ::  (Lat a, Lon a, Time a) => [Selected (Trail a)] -> Trail a
-bezierCurve = concatMap (onSelected transformToBezierCurve Prelude.id)
+bezierCurve = concatMap (onSelected (bezierCurveAt []) Prelude.id)
 
 -- |Filters out any points that go backward in time (thus must not be
 -- valid if this is a trail)
@@ -403,6 +417,22 @@ southMost cs = Just . minimumBy (comparing lat) $ cs
 -- defined functions. They can serve either for concise use for novice
 -- users or as instructional examples.
 ------------------------------------------
+{-
+smoothRests :: (Lat a, Lon a, Time a) => Trail a -> Trail a
+smoothRests = bezierCurve . refineGrouping (everyNPoints 8) . restLocations 30 60
 
-smoothStoppedPoints :: (Lat a, Lon a, Time a) => Trail a -> Trail a
-smoothStoppedPoints = bezierCurve . refineGrouping (everyNPoints 8) . restLocations 30 60
+smoothSegments :: (Lat a, Lon a, Time a) => Trail a -> Trail a
+smoothSegments = bezierCurve . everyNPoints 4
+
+smoothPath :: (Lat a, Lon a, Time a) => Trail a -> Trail a
+smoothPath ps = undefined
+  
+slidingWindow :: Int -> Int -> ([a] -> [a]) -> [a] -> [a]
+slidingWindow width step f trail = go trail
+  where
+    go [] = []
+    go xs =
+      let (window,e) = splitAt width xs
+          (hT,eT) = splitAt step (f window)
+      in hT ++ go (eT ++ e)
+-}

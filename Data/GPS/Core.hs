@@ -53,7 +53,7 @@ type Vector = (Distance, Heading)
 
 type Trail a = [a]
 
-getUTCTime :: (Lat a, Lon a, Time a) => a -> Maybe UTCTime
+getUTCTime :: (Time a) => a -> Maybe UTCTime
 getUTCTime = fmap toUTCTime . time
 
 acos' x = if x > 1 then acos 1 else if x < (-1) then acos (-1) else acos x
