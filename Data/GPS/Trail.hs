@@ -94,6 +94,7 @@ slidingAverageSpeed m minTime xs =
   
   --  getAvg :: [] -> AvgMethod -> Speed
   getAvg _ [] = 0
+  getAvg _ [x] = 0
   getAvg m cs =
     let ss = getSpeedsV cs
     in case m of
