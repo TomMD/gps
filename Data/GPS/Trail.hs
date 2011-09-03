@@ -11,6 +11,7 @@ module Data.GPS.Trail
          -- * Trail Functions
          -- ** Queries
        , totalDistance
+       , totalTime
        , avgSpeeds
        , slidingAverageSpeed
        , closestDistance
@@ -33,7 +34,7 @@ module Data.GPS.Trail
        , unionOf
        , refineGrouping
        , (/\), (\/)
-       --  -- ** Composite Operations (Higher Level)
+         -- ** Composite Operations (Higher Level)
        -- , smoothRests
        -- , smoothSegments
        -- , smoothPath
@@ -83,18 +84,17 @@ avgSpeeds = slidingAverageSpeed AvgHarmonicMean
 slidingAverageSpeed :: (Lat a, Lon a, Time a) => 
                        AvgMethod a -> NominalDiffTime -> Trail a -> [(UTCTime, Speed)]
 slidingAverageSpeed _ _ [] = []
-slidingAverageSpeed m n (x:xs) =
-    let avg = getAvg (x:xs') m
-        avgTime = getAvgTime x (fromMaybe x e)
-    in case avgTime of
-	Nothing -> []
-        Just t  -> (t,avg) : slidingAverageSpeed m n xs
+slidingAverageSpeed m minTime xs =
+  let pts   = map unSelect (spansTime minTime xs)
+      spds  = map (getAvg m) pts
+      times = map getAvgTimes pts
+  in concatMap maybeToList $ zipWith (\t s -> fmap (,s) t) times spds
   where
-  (e,xs',rest) = takeWhileEnd (\c -> getTimeDiff c x <= Just n) xs
   getTimeDiff a b = on (liftM2 diffUTCTime) getUTCTime a b
   
   --  getAvg :: [] -> AvgMethod -> Speed
-  getAvg cs AvgMean =
+  getAvg _ [] = 0
+  getAvg m cs =
     let ss = getSpeedsV cs
     in case m of
         AvgMean -> mean ss
@@ -107,12 +107,15 @@ slidingAverageSpeed m n (x:xs) =
           in if V.length ss' < 3
              then mean ss'
              else if odd len then ss' V.! mid else mean (V.slice mid 2 ss')
-        AvgEndPoints -> fromMaybe 0 . join . fmap (speed x) $ e
-        AvgMinOf as -> minimum $ map (getAvg cs) as
+        AvgEndPoints -> fromMaybe 0 $ speed (head cs) (last cs)
+        AvgMinOf as -> minimum $ map (flip getAvg cs) as
         AvgWith f -> f cs
+  getAvgTimes [] = Nothing
+  getAvgTimes [x] = getUTCTime x
+  getAvgTimes ps = getAvgTime (head ps) (last ps)
   getAvgTime a b = liftM2 addUTCTime (getTimeDiff b a) (getUTCTime a)
   getSpeedsV = V.fromList . getSpeeds
-  getSpeeds zs = concatMap (maybeToList . uncurry speed) $ zip zs (drop 1 zs)
+  getSpeeds zs = concatMap maybeToList $ zipWith speed zs (drop 1 zs)
 
 type TrailTransformation c = [Selected (Trail c)] -> Trail c
 
@@ -372,6 +375,10 @@ closestDistance as bs = listToMaybe $ L.sort [distance a b | a <- as, b <- bs]
 totalDistance :: (Lat a, Lon a) => [a] -> Distance
 totalDistance as = sum $ zipWith distance as (drop 1 as)
 
+totalTime :: Time a => Trail a -> NominalDiffTime
+totalTime [] = 0
+totalTime xs@(x:_) = fromMaybe 0 $ liftM2 diffUTCTime (getUTCTime x) (getUTCTime $ last xs)
+
 -- | Uses Grahams scan to compute the convex hull of the given points.
 -- This operation requires sorting of the points, so don't try it unless
 -- you have notably more memory than the list of points will consume.
@@ -417,12 +424,16 @@ southMost cs = Just . minimumBy (comparing lat) $ cs
 -- defined functions. They can serve either for concise use for novice
 -- users or as instructional examples.
 ------------------------------------------
-{-
+
 smoothRests :: (Lat a, Lon a, Time a) => Trail a -> Trail a
 smoothRests = bezierCurve . refineGrouping (everyNPoints 8) . restLocations 30 60
 
 smoothSegments :: (Lat a, Lon a, Time a) => Trail a -> Trail a
-smoothSegments = bezierCurve . everyNPoints 4
+smoothSegments ps = 
+  let ps' = bezierCurve . everyNPoints 5 $ ps
+      (h,t) = splitAt 2 ps'
+      ps'' = bezierCurve . everyNPoints 5 $ t
+  in h ++ ps''
 
 smoothPath :: (Lat a, Lon a, Time a) => Trail a -> Trail a
 smoothPath ps = undefined
@@ -435,4 +446,3 @@ slidingWindow width step f trail = go trail
       let (window,e) = splitAt width xs
           (hT,eT) = splitAt step (f window)
       in hT ++ go (eT ++ e)
--}

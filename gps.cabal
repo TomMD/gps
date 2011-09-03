@@ -1,10 +1,10 @@
 name:		gps
-version:	0.8
+version:	0.8.1
 license:	BSD3
 license-file:	LICENSE
 author:		Thomas DuBuisson <thomas.dubuisson@gmail.com>
 maintainer:	Thomas DuBuisson
-description:	Useful for manipulating GPS coordinages (in various forms), building paths, and performing basic computations
+description:	Useful for manipulating GPS coordinages (in various forms), building paths, and performing basic computations.  NOTE: Version range 0.8.* won't strictly follow PVP - I will be adding additional functions in minor releases 0.8.x.
 synopsis:	For manipulating GPS coordinates and trails.
 category:	Data
 stability:	stable
@@ -22,3 +22,7 @@ Library
   exposed-modules: Data.GPS
   other-modules: Data.GPS.Core Data.GPS.Trail
   ghc-options:
+
+source-repository head
+  type:     git
+  location: git@github.com:TomMD/gps.git
