@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 module Data.GPS.Core
        ( -- * Types
          Distance
@@ -11,6 +12,7 @@ module Data.GPS.Core
        , east
        , west
        , radiusOfEarth
+       , circumferenceOfEarth
          -- * Coordinate Functions
        , heading
        , distance
@@ -33,7 +35,7 @@ module Data.GPS.Core
 import Data.Time
 import Data.Maybe
 import Control.Monad
-import Text.XML.HXT.Arrow
+import Text.XML.HXT.Core
 import Text.XML.XSD.DateTime(DateTime,toUTCTime)
 import Data.Geo.GPX
 
@@ -47,6 +49,7 @@ type Distance = Double
 -- 	(3/2)pi	== East    == - (pi / 2)
 type Heading = Double
 
+type Angle = Double
 -- |Speed is hard coded as meters per second
 type Speed = Double
 type Vector = (Distance, Heading)
@@ -56,25 +59,25 @@ type Trail a = [a]
 getUTCTime :: (Time a) => a -> Maybe UTCTime
 getUTCTime = fmap toUTCTime . time
 
-acos' x = if x > 1 then acos 1 else if x < (-1) then acos (-1) else acos x
-
 distance :: (Lat a, Lon a, Lat b, Lon b) => a -> b -> Distance
-distance a b =
-	let x  = sin lat1 * sin lat2 + cos lat1 * cos lat2 * cos (lon2 - lon1)
-	in radiusOfEarth * acos' x
- where
-  (lat1, lon1) = getRadianPairD a
-  (lat2, lon2) = getRadianPairD b
+distance x y =
+  let (lat1,lon1) = getRadianPairD x
+      (lat2,lon2) = getRadianPairD y
+      deltaLat    = lat2 - lat1
+      deltaLon    = lon2 - lon1
+      a = (sin (deltaLat / 2))^2 + cos lat1 * cos lat2 * (sin (deltaLon / 2))^2
+      c = 2 * atan2 (a**0.5) ((1-a)**0.5)
+  in radiusOfEarth * c
 
 -- | Direction two points aim toward (0 = North, pi/2 = West, pi = South, 3pi/2 = East)
 heading         :: (Lat a, Lon a, Lat b, Lon b) => a -> b -> Heading
 heading a b =
-	atan2	(sin (diffLon) * cos (lat2)) 
+	atan2	(sin (diffLon) * cos (lat2))
 		(cos(lat1) * sin (lat2) - sin(lat1) * cos lat2 * cos (diffLon))
  where
   (lat1, lon1) = getRadianPairD a
   (lat2, lon2) = getRadianPairD b
-  diffLon = lon1 - lon2
+  diffLon = lon2 - lon1
 
 getVector :: (Lat a, Lon a, Lat b, Lon b) => a -> b -> Vector
 getVector a b = (distance a b, heading a b)
@@ -94,8 +97,10 @@ addVector (d,h) p = setLon (longitudeType $ toDegrees lon2)
                   . setLat (latitudeType $ toDegrees lat2) $ p
   where
 	(lat,lon) = getRadianPairD p
-	lat2 = lat + (cos h) * (d / radiusOfEarth)
-	lon2 = lon - acos' ( (cos (d/radiusOfEarth) - sin lat * sin lat2) / (cos lat * cos lat2))
+	lat2 = asin (sin (lat) * cos (d / radiusOfEarth) + cos(lat) 
+                     * sin(d/radiusOfEarth) * cos h)
+        lon2 = lon + atan2 (sin h * sin (d / radiusOfEarth) * cos lat)
+                           (cos (d/radiusOfEarth) - sin lat * sin lat2)
 
 -- | Speed in meters per second, only if a 'Time' was recorded for each waypoint.
 speed :: (Lat loc, Lon loc, Time loc, Lat b, Lon b, Time b) => loc -> b -> Maybe Speed
@@ -109,6 +114,10 @@ speed a b =
 -- |radius of the earth in meters
 radiusOfEarth :: Double
 radiusOfEarth = 6378700
+
+-- |Circumference of earht (meters)
+circumferenceOfEarth :: Double
+circumferenceOfEarth = radiusOfEarth * 2 * pi
 
 -- |North is 0 radians
 north :: Heading
