@@ -6,7 +6,8 @@ GPS
 This is a Haskell library for querying and manipulating GPS
 coordinates and/or trails (lists of coordinates).
 
-CURRENT STATE ------------- 
+CURRENT STATE
+------------- 
 
 The basic queries such as speed, distance or heading between points,
 adding a vector to a point, average speed for a track, and total track
