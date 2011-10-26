@@ -1,5 +1,5 @@
 name:		gps
-version:	0.8.1
+version:	0.8.2
 license:	BSD3
 license-file:	LICENSE
 author:		Thomas DuBuisson <thomas.dubuisson@gmail.com>
@@ -16,7 +16,7 @@ extra-source-files:
 Library
   Build-Depends: base >= 3 && < 6,
                    pretty >= 1.0 , prettyclass >= 1.0,
-                   time >= 1.1, GPX == 0.5.*, hxt >= 9.1, xsd == 0.3.*,
+                   time >= 1.1, GPX >= 0.5, hxt >= 9.1, xsd >= 0.3,
                    vector >= 0.7, statistics >= 0.9
   hs-source-dirs:
   exposed-modules: Data.GPS

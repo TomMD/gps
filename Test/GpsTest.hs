@@ -20,10 +20,10 @@ instance Arbitrary DateTime where
   arbitrary = liftM fromUTCTime arbitrary
 
 instance Arbitrary UTCTime where
-  arbitrary = UTCTime <$> arbitrary <*> liftM fromIntegral (arbitrary :: Gen Integer)
+  arbitrary = UTCTime <$> arbitrary <*> liftM (secondsToDiffTime . abs) (arbitrary :: Gen Integer)
 
 instance Arbitrary Day where
-  arbitrary = fromGregorian <$> arbitrary <*> arbitrary <*> arbitrary
+  arbitrary = fromGregorian <$> liftM ((+ 1000) . (`mod` 1100) .abs) arbitrary <*> liftM abs arbitrary <*> liftM abs arbitrary
 
 instance Arbitrary NominalDiffTime where
   arbitrary = liftM fromIntegral (arbitrary :: Gen Int)
@@ -65,9 +65,6 @@ instance Arbitrary Trl where
 approxEq :: WptType -> WptType -> Bool
 approxEq a b = distance a b <= 0.2 -- error of 13cm has been observed due to floating point issues when using add vector.
 
-pCentralAngleDoesn'tCrash :: WptType -> WptType -> Bool
-pCentralAngleDoesn'tCrash a b = let x = centralAngle a b in x > 1 || x <= 1 || x < 10
-
 pSaneDistance :: WptType -> WptType -> Bool
 pSaneDistance a b = distance a b <= circumferenceOfEarth / 2
 
@@ -82,24 +79,35 @@ pAddVector_DistanceHeading_ident a b =
       c = addVector v a
   in (distance c b) <= 0.01 * (distance a b)
 
-pConvexHull_BezierCurve_Const :: Trl -> Int -> Bool
-pConvexHull_BezierCurve_Const (Trl ts) n =
+pConvexHull_Has_Extreme_Points :: Trl -> Bool
+pConvexHull_Has_Extreme_Points (Trl ts) =
   let ch = convexHull ts
-      n' = (n `rem` 9) + 1
-  in ch == convexHull (ch ++ bezierCurve (everyNPoints n' ts))
+      ts' = sortBy (comparing lat) ts
+      northMost = last ts'
+      southMost = head ts'
+  in length ts < 3 || (northMost `elem` ch && southMost `elem` ch)
+
+pConvexHull_Bezier_Const :: Trl -> Double -> Bool
+pConvexHull_Bezier_Const (Trl ts) n =
+  let ts' = take 10 ts
+      ch  = convexHull ts'
+      n'  = abs (n `mod'` 1)
+      bp  = bezierPoint ts' n'
+      ch' = convexHull  (bp:ts')
+  in length ts < 3 || ch == ch'
 
 tests :: [Test]
 tests =
   [
     testGroup "Coordinate Computations"
     [ testProperty "approxEq_id" (\x -> approxEq x x)
-    , testProperty "saneCentralAngle" pCentralAngleDoesn'tCrash
     , testProperty "saneDistance" pSaneDistance
     , testProperty "TriangleTheorem" pTriangleTheorem
     , testProperty "Vector identity" pAddVector_DistanceHeading_ident
     ]
   , testGroup "Trail Computations"
-    [ testProperty "HullContainsBezier" pConvexHull_BezierCurve_Const]
+    [ testProperty "Hull has extreme points" pConvexHull_Has_Extreme_Points
+    , testProperty "HullContainsBezier" pConvexHull_Bezier_Const]
   ]
 
 
