@@ -345,7 +345,7 @@ bezierCurveAt selectedTimes xs =
   in if any (\x -> x < 0 || x > 1) queryTimes
 	then error "bezierCurveAt has a out-of-bound time!"
         else
-         if null timesDef || totalTime == 0 || 
+         if null timesDef || totalTime == 0 || any (\x -> x < 0 || x > 1) queryTimes
          then xs
          else let curvePoints = (map (bezierPoint xs) queryTimes)
                   newTimes = [addUTCTime t (snd top) | t <- diffTimes]
