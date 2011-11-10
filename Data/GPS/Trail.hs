@@ -36,8 +36,8 @@ module Data.GPS.Trail
        , (/\), (\/)
          -- ** Composite Operations (Higher Level)
        , smoothRests
-       , smoothSegments
---       , smoothPath
+       , smoothSome
+       , smoothMore
         -- * Misc
        , bezierPoint
          ) where
@@ -208,8 +208,9 @@ spansTime :: (Lat a, Lon a, Time a) => NominalDiffTime -> PointGrouping a
 spansTime n ps =
   let times  = mkTimePair ps
       chunk [] = []
-      chunk (x:xs) =
-        let (good,rest) = span ((<= addUTCTime n (snd x)) . snd) xs in good : chunk rest
+      chunk xs@(x:_) =
+        let (good,rest) = span ((<= addUTCTime n (snd x)) . snd) xs 
+        in if null good then [xs] else good : chunk rest
   in map (Select . map fst) $ chunk times
 
 -- | intersects the given groupings
@@ -334,6 +335,7 @@ mkTimePair xs =
 -- coordinates are available and all equal (Ex: all points are 5
 -- seconds apart), the results will be poor if this is not the case!
 bezierCurveAt :: (Lat a, Lon a, Time a) => [UTCTime] -> Trail a -> Trail a
+bezierCurveAt _ [] = []
 bezierCurveAt selectedTimes xs = 
   let timesDef = mkTimePair xs
       end = last timesDef
@@ -342,10 +344,10 @@ bezierCurveAt selectedTimes xs =
       times = if null selectedTimes then map snd timesDef else selectedTimes
       diffTimes = [diffUTCTime t (snd top) / totalTime | t <- times]
       queryTimes = map realToFrac diffTimes
-  in if any (\x -> x < 0 || x > 1) queryTimes
-	then error "bezierCurveAt has a out-of-bound time!"
+  in if totalTime <= 0 || any (\x -> x < 0 || x > 1) queryTimes
+	then xs -- error "bezierCurveAt has a out-of-bound time!"
         else
-         if null timesDef || totalTime == 0 || any (\x -> x < 0 || x > 1) queryTimes
+         if null timesDef || any (\x -> x < 0 || x > 1) queryTimes
          then xs
          else let curvePoints = (map (bezierPoint xs) queryTimes)
                   newTimes = [addUTCTime t (snd top) | t <- diffTimes]
@@ -437,18 +439,17 @@ southMost cs = Just . minimumBy (comparing lat) $ cs
 smoothRests :: (Lat a, Lon a, Time a) => Trail a -> Trail a
 smoothRests = bezierCurve . refineGrouping (everyNPoints 8) . restLocations 30 60
 
-smoothSegments :: (Lat a, Lon a, Time a) => Trail a -> Trail a
-smoothSegments ps = bezierCurve . everyNPoints 7 $ ps
-{-
+smoothSome :: (Lat a, Lon a, Time a) => Trail a -> Trail a
+smoothSome ps = bezierCurve . everyNPoints 7 $ ps
+
+smoothMore :: (Lat a, Lon a, Time a) => Trail a -> Trail a
+smoothMore ps =
   let op xs =
-        let xs' = bezierCurve . everyNPoints 7 $ xs
+        let xs' = bezierCurve . spansTime 60 $ xs
             (h,t) = splitAt 3 xs'
-            xs''  = bezierCurve . everyNPoints 7 $ xs'
+            xs''  = bezierCurve . spansTime 46 $ t
         in h ++ xs''
   in iterate op ps !! 10
--}
-smoothPath :: (Lat a, Lon a, Time a) => Trail a -> Trail a
-smoothPath ps = undefined
   
 slidingWindow :: Int -> Int -> ([a] -> [a]) -> [a] -> [a]
 slidingWindow width step f trail = go trail
