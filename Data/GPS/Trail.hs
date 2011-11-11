@@ -440,16 +440,19 @@ smoothRests :: (Lat a, Lon a, Time a) => Trail a -> Trail a
 smoothRests = bezierCurve . refineGrouping (everyNPoints 8) . restLocations 30 60
 
 smoothSome :: (Lat a, Lon a, Time a) => Trail a -> Trail a
-smoothSome ps = bezierCurve . everyNPoints 7 $ ps
+smoothSome = gSmoothSome 7
+
+gSmoothSome n = bezierCurve . everyNPoints n
+
+gSmoothMore n k ps =
+  let ps' = gSmoothSome n ps
+      (h,t) = splitAt k ps'
+  in h ++ gSmoothSome n t
 
 smoothMore :: (Lat a, Lon a, Time a) => Trail a -> Trail a
-smoothMore ps =
-  let op xs =
-        let xs' = bezierCurve . spansTime 60 $ xs
-            (h,t) = splitAt 3 xs'
-            xs''  = bezierCurve . spansTime 46 $ t
-        in h ++ xs''
-  in iterate op ps !! 10
+smoothMore
+  = gSmoothMore 7 3 . gSmoothMore 3 1 . gSmoothMore 5 2
+  . gSmoothMore 3 1 . gSmoothMore 5 2 . gSmoothMore 7 3
   
 slidingWindow :: Int -> Int -> ([a] -> [a]) -> [a] -> [a]
 slidingWindow width step f trail = go trail
