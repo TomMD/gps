@@ -3,6 +3,8 @@ module Data.GPS.Trail
        ( -- * Types         
          AvgMethod(..)
        , Selected(..)
+       , PointGrouping
+       , TransformGrouping
          -- * Utility Functions
        , isSelected
        , isNotSelected
@@ -121,20 +123,21 @@ slidingAverageSpeed m minTime xs =
   getSpeedsV = V.fromList . getSpeeds
   getSpeeds zs = concatMap maybeToList $ zipWith speed zs (drop 1 zs)
 
-type TrailTransformation c = [Selected (Trail c)] -> Trail c
-
 -- | A PointGrouping is a function that selects segments of a trail.
 -- 
 -- Grouping point _does not_ result in deleted points. It is always true that:
 --
---     forall g : PointGrouping c -->
+--     forall g :: PointGrouping c -->
 --     concatMap unSelect (g ts) == ts
 --
 -- The purpose of grouping is usually for later processing.  Any desire to drop
 -- points that didn't meet a particular grouping criteria can be filled with
--- a composition with 'filter' (or directly via 'filterPoints'.
+-- a composition with 'filter' (or directly via 'filterPoints').
 type PointGrouping c = Trail c -> [Selected (Trail c)]
 
+-- | Given a selection of coordinates, transform the selected
+-- coordinates in some way (while leaving the non-selected
+-- coordinates unaffected).
 type TransformGrouping c = [Selected (Trail c)] -> [Selected (Trail c)]
 
 -- | When grouping points, lists of points are either marked as 'Select' or 'NotSelect'.
