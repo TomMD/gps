@@ -399,7 +399,7 @@ convexHull xs =
 	in case first of
 		Nothing -> []
 		Just f  ->
-	    	     let sorted = sortBy (comparing (eastZeroHeading f)) (filter (/= f) xs)
+	    	     let sorted = L.sortBy (comparing (eastZeroHeading f)) (filter (/= f) xs)
 		     in case sorted of
 			(a:b:cs) -> grahamScan (b:a:f:[]) cs
 			cs       -> f : cs
