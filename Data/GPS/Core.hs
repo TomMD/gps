@@ -23,6 +23,7 @@ module Data.GPS.Core
        , getDMSPair
        , divideArea
        , interpolate
+       , circleIntersectionPoints
          -- * IO helpers
        , writeGPX
        , readGPX
@@ -115,7 +116,7 @@ speed a b =
 radiusOfEarth :: Double
 radiusOfEarth = 6378700
 
--- |Circumference of earht (meters)
+-- |Circumference of earth (meters)
 circumferenceOfEarth :: Double
 circumferenceOfEarth = radiusOfEarth * 2 * pi
 
@@ -160,6 +161,16 @@ interpolate c1 c2 w
   let (h,d) = (heading c1 c2, distance c1 c2)
       v = (d * w, h)
   in addVector v c1
+
+circleIntersectionPoints :: (Lat a, Lon a) => (a, Distance) -> (a, Distance) -> (a,a)
+circleIntersectionPoints (a,r1) (b,r2)
+  | lat a == lat b && lon a == lon b && r1 == r2 = (a,b) -- FIXME need approx eq
+  | otherwise =
+  let ab = distance a b
+      angABX = acos ( (r1^2 + ab^2 - r2^2) / (2 * r1 * ab) )
+      ang1 = heading a b + angABX
+      ang2 = heading a b - angABX
+  in (addVector (r1,ang1) a, addVector (r1,ang2) a)
      
 -- |@divideArea vDist hDist nw se@ divides an area into a grid of equally
 -- spaced coordinates within the box drawn by the northwest point (nw) and
