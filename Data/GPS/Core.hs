@@ -162,15 +162,19 @@ interpolate c1 c2 w
       v = (d * w, h)
   in addVector v c1
 
-circleIntersectionPoints :: (Lat a, Lon a) => (a, Distance) -> (a, Distance) -> (a,a)
+-- | Compute the points at which two circles intersect (assumes a flat plain).  If
+-- the circles do not intersect then the values of the lat/lon will be NaN.  If the
+-- circles overlap (intersect at infinitely many points) then the value will be Nothing.
+circleIntersectionPoints :: (Lat a, Lon a) => (a, Distance) -> (a, Distance) -> Maybe (a,a)
 circleIntersectionPoints (a,r1) (b,r2)
-  | lat a == lat b && lon a == lon b && r1 == r2 = (a,b) -- FIXME need approx eq
-  | otherwise =
-  let ab = distance a b
-      angABX = acos ( (r1^2 + ab^2 - r2^2) / (2 * r1 * ab) )
-      ang1 = heading a b + angABX
-      ang2 = heading a b - angABX
-  in (addVector (r1,ang1) a, addVector (r1,ang2) a)
+  | lat a == lat b && lon a == lon b && r1 == r2 = Nothing -- FIXME need approx eq
+  | r1 + r2 < ab = Nothing
+  | otherwise = Just (addVector (r1, ang1) a, addVector (r1,ang2) a)
+  where
+  angABX = acos ( (r1^2 + ab^2 - r2^2) / (2 * r1 * ab) )
+  ang1 = heading a b + angABX
+  ang2 = heading a b - angABX
+  ab = distance a b
      
 -- |@divideArea vDist hDist nw se@ divides an area into a grid of equally
 -- spaced coordinates within the box drawn by the northwest point (nw) and
