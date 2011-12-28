@@ -6,13 +6,15 @@ GPS
 This is a Haskell library for querying and manipulating GPS
 coordinates and/or trails (lists of coordinates).
 
-CURRENT STATE
-------------- 
+Features
+--------
 
-The basic queries such as speed, distance or heading between points,
-adding a vector to a point, average speed for a track, and total track
-distance all operate.  Some trivial quickcheck properties are included
-but they are nowhere near complete.
+- basic coordinate operations: speed, distance and heading
+- advanced coordinate functions: addVector, divideArea, and point interpolation
+- flat-plain geometry: circleIntersectionPoints, intersectionArcsOf, maximumDistanceOfArc
+- Trail filters and queries including: total distance, time, average speed, convex hull, bezier curve interpolation and more.
 
-Advanced operations include path smoothing (using bezier curve point
-interpolation), rest location extraction, and coordinate grouping operations.
+The Future
+---------- 
+
+- Determine the "best guess" triangulation coordinate given an set of intersecting circles.
