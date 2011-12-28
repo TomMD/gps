@@ -1,4 +1,4 @@
-{-# LANGUAGE CPP #-}
+{-# LANGUAGE TupleSections #-}
 module Data.GPS.Core
        ( -- * Types
          Distance
@@ -6,6 +6,8 @@ module Data.GPS.Core
        , Speed
        , Vector
        , Trail
+       , Circle
+       , Arc
          -- * Constants
        , north
        , south
@@ -24,6 +26,8 @@ module Data.GPS.Core
        , divideArea
        , interpolate
        , circleIntersectionPoints
+       , intersectionArcsOf
+       , maximumDistanceOfArc
          -- * IO helpers
        , writeGPX
        , readGPX
@@ -35,6 +39,8 @@ module Data.GPS.Core
 
 import Data.Time
 import Data.Maybe
+import Data.List (sortBy)
+import Data.Ord (comparing)
 import Control.Monad
 import Text.XML.HXT.Core
 import Text.XML.XSD.DateTime(DateTime,toUTCTime)
@@ -50,11 +56,17 @@ type Distance = Double
 -- 	(3/2)pi	== East    == - (pi / 2)
 type Heading = Double
 
-type Angle = Double
 -- |Speed is hard coded as meters per second
 type Speed = Double
 type Vector = (Distance, Heading)
 
+-- | Genearlly a circle indicates a known area in which we are searching
+-- (so a center point and maximum possible distance from that point)
+type Circle a = (a, Distance)
+
+-- | An arc is represented as a circle, starting heading and ending heading
+type Arc a = (Circle a, Heading, Heading)
+ 
 type Trail a = [a]
 
 getUTCTime :: (Time a) => a -> Maybe UTCTime
@@ -151,8 +163,8 @@ getRadianPair p = (toRadians (lat p), toRadians (lon p))
 toRadians :: Floating f => f -> f
 toRadians = (*) (pi / 180)
 
--- | @interpolate c1 c2 w@ where 0 <= w <= 1 Gives a point on the line
--- between c1 and c2 equal to @c1 when @w == 0@ (weighted linearly
+-- | @interpolate c1 c2 w@ where @0 <= w <= 1@ Gives a point on the line
+-- between c1 and c2 equal to c1 when @w == 0@ (weighted linearly
 -- toward c2).
 interpolate :: (Lat a, Lon a) => a -> a -> Double -> a
 interpolate c1 c2 w
@@ -163,19 +175,51 @@ interpolate c1 c2 w
   in addVector v c1
 
 -- | Compute the points at which two circles intersect (assumes a flat plain).  If
--- the circles do not intersect then the values of the lat/lon will be NaN.  If the
--- circles overlap (intersect at infinitely many points) then the value will be Nothing.
+-- the circles do not intersect or are identical then the result is @Nothing@.
 circleIntersectionPoints :: (Lat a, Lon a) => (a, Distance) -> (a, Distance) -> Maybe (a,a)
 circleIntersectionPoints (a,r1) (b,r2)
   | lat a == lat b && lon a == lon b && r1 == r2 = Nothing -- FIXME need approx eq
   | r1 + r2 < ab = Nothing
-  | otherwise = Just (addVector (r1, ang1) a, addVector (r1,ang2) a)
+  | any isNaN (map lat pts) || any isNaN (map lon pts) = Nothing
+  | otherwise = Just (p1, p2)
   where
+  ab = distance a b
   angABX = acos ( (r1^2 + ab^2 - r2^2) / (2 * r1 * ab) )
   ang1 = heading a b + angABX
   ang2 = heading a b - angABX
-  ab = distance a b
-     
+  p1 = addVector (r1, ang1) a
+  p2 = addVector (r1, ang2) a
+  pts = [p1,p2]
+
+-- | Find the area in which all given circles intersect.  The resulting
+-- area is described in terms of the bounding arcs.   All cirlces must
+-- intersect at two points.
+intersectionArcsOf :: (Lat a, Lon a) => [Circle a] -> [Arc a]
+intersectionArcsOf cs =
+  let isArcWithinCircle circ arc = maximumDistanceOfArc (fst circ) arc <= (snd circ)
+      isArcWithinAllCircles arc = all ($ arc) (map isArcWithinCircle cs)
+      -- getArcs :: Circle a -> Circle a -> [Arc a]
+      getArcs c1 c2 = concatMap (buildArcsFromPoints c1 c2) . maybeToList $ circleIntersectionPoints c1 c2
+      -- buildArcsFromPoints :: (a, a) -> [Arc a]
+      buildArcsFromPoints c1 c2 (p1,p2) =
+          let c1h1 = heading (fst c1) p1
+              c1h2 = heading (fst c1) p2
+              c2h1 = heading (fst c2) p1
+              c2h2 = heading (fst c2) p2
+          in [(c1,c1h1,c1h2), (c1,c1h2, c1h1), (c2,c2h1,c2h2), (c2,c2h2,c2h1)]
+  in filter isArcWithinAllCircles . concatMap (uncurry getArcs) . choose2 $ cs
+
+maximumDistanceOfArc :: (Lat a, Lon a) => a -> Arc a -> Distance
+maximumDistanceOfArc pnt ((c,r), h1, h2) =
+  let pcHeading = heading pnt c
+  in if ((pcHeading < h1 || pcHeading > h2) && h1 < h2) || ((pcHeading > h2 && pcHeading < h1) && h1 > h2)
+         then max (distance pnt (addVector (r,h1) c)) (distance pnt (addVector (r,h2) c))
+         else distance pnt c + r
+
+choose2 :: [a] -> [(a,a)]
+choose2 [] = []
+choose2 (x:xs) = map (x,) xs ++ choose2 xs
+
 -- |@divideArea vDist hDist nw se@ divides an area into a grid of equally
 -- spaced coordinates within the box drawn by the northwest point (nw) and
 -- southeast point (se).  Because this uses floating point there might be a
