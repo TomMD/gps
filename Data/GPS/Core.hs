@@ -45,6 +45,7 @@ import Control.Monad
 import Text.XML.HXT.Core
 import Text.XML.XSD.DateTime(DateTime,toUTCTime)
 import Data.Geo.GPX
+import Data.Lens.Common
 
 -- |Distances are expressed in meters
 type Distance = Double
@@ -69,10 +70,10 @@ type Arc a = (Circle a, Heading, Heading)
  
 type Trail a = [a]
 
-getUTCTime :: (Time a) => a -> Maybe UTCTime
-getUTCTime = fmap toUTCTime . time
+getUTCTime :: (TimeL a) => a -> Maybe UTCTime
+getUTCTime = fmap toUTCTime . (^. timeL)
 
-distance :: (Lat a, Lon a, Lat b, Lon b) => a -> b -> Distance
+distance :: (LatL a, LonL a, LatL b, LonL b) => a -> b -> Distance
 distance x y =
   let (lat1,lon1) = getRadianPairD x
       (lat2,lon2) = getRadianPairD y
@@ -83,7 +84,7 @@ distance x y =
   in radiusOfEarth * c
 
 -- | Direction two points aim toward (0 = North, pi/2 = West, pi = South, 3pi/2 = East)
-heading         :: (Lat a, Lon a, Lat b, Lon b) => a -> b -> Heading
+heading         :: (LatL a, LonL a, LatL b, LonL b) => a -> b -> Heading
 heading a b =
 	atan2	(sin (diffLon) * cos (lat2))
 		(cos(lat1) * sin (lat2) - sin(lat1) * cos lat2 * cos (diffLon))
@@ -92,7 +93,7 @@ heading a b =
   (lat2, lon2) = getRadianPairD b
   diffLon = lon2 - lon1
 
-getVector :: (Lat a, Lon a, Lat b, Lon b) => a -> b -> Vector
+getVector :: (LatL a, LonL a, LatL b, LonL b) => a -> b -> Vector
 getVector a b = (distance a b, heading a b)
 
 -- |Given a vector and coordinate, computes a new coordinate.
@@ -105,9 +106,10 @@ getVector a b = (distance a b, heading a b)
 -- 	@heading == heading start dest@
 -- 	
 -- 	@dist    == distance start dest@
-addVector :: (Lat c, Lon c) => Vector -> c -> c
-addVector (d,h) p = setLon (longitudeType $ toDegrees lon2) 
-                  . setLat (latitudeType $ toDegrees lat2) $ p
+addVector :: (LatL c, LonL c) => Vector -> c -> c
+addVector (d,h) p = (lonL ^= longitude (toDegrees lon2))
+                  . (latL ^= latitude  (toDegrees lat2))
+                  $ p
   where
 	(lat,lon) = getRadianPairD p
 	lat2 = asin (sin (lat) * cos (d / radiusOfEarth) + cos(lat) 
@@ -116,7 +118,7 @@ addVector (d,h) p = setLon (longitudeType $ toDegrees lon2)
                            (cos (d/radiusOfEarth) - sin lat * sin lat2)
 
 -- | Speed in meters per second, only if a 'Time' was recorded for each waypoint.
-speed :: (Lat loc, Lon loc, Time loc, Lat b, Lon b, Time b) => loc -> b -> Maybe Speed
+speed :: (LatL loc, LonL loc, TimeL loc, LatL b, LonL b, TimeL b) => loc -> b -> Maybe Speed
 speed a b = 
   case (getUTCTime b, getUTCTime a) of
     (Just x, Just y) -> 
@@ -150,15 +152,15 @@ west = pi / 2
 
 toDegrees = (*) (180 / pi)
 
-getRadianPairD :: (Lat c, Lon c) => c -> (Double,Double)
+getRadianPairD :: (LatL c, LonL c) => c -> (Double,Double)
 getRadianPairD = (\(a,b) -> (realToFrac a, realToFrac b)) . getRadianPair
 
-getDMSPair :: (Lat c, Lon c) => c -> (LatitudeType, LongitudeType)
-getDMSPair c = (lat c, lon c)
+getDMSPair :: (LatL c, LonL c) => c -> (Latitude, Longitude)
+getDMSPair c = (c ^. latL, c ^. lonL)
 
 -- |Provides a lat/lon pair of doubles in radians
-getRadianPair :: (Lat p, Lon p) => p -> (LatitudeType, LongitudeType)
-getRadianPair p = (toRadians (lat p), toRadians (lon p))
+getRadianPair :: (LatL p, LonL p) => p -> (Latitude, Longitude)
+getRadianPair p = (toRadians (p ^. latL), toRadians (p ^. lonL))
 
 toRadians :: Floating f => f -> f
 toRadians = (*) (pi / 180)
@@ -166,7 +168,7 @@ toRadians = (*) (pi / 180)
 -- | @interpolate c1 c2 w@ where @0 <= w <= 1@ Gives a point on the line
 -- between c1 and c2 equal to c1 when @w == 0@ (weighted linearly
 -- toward c2).
-interpolate :: (Lat a, Lon a) => a -> a -> Double -> a
+interpolate :: (LatL a, LonL a) => a -> a -> Double -> a
 interpolate c1 c2 w
   | w < 0 || w > 1 = error "Interpolate only works with a weight between zero and one"
   | otherwise = 
@@ -176,11 +178,11 @@ interpolate c1 c2 w
 
 -- | Compute the points at which two circles intersect (assumes a flat plain).  If
 -- the circles do not intersect or are identical then the result is @Nothing@.
-circleIntersectionPoints :: (Lat a, Lon a) => (a, Distance) -> (a, Distance) -> Maybe (a,a)
+circleIntersectionPoints :: (LatL a, LonL a) => (a, Distance) -> (a, Distance) -> Maybe (a,a)
 circleIntersectionPoints (a,r1) (b,r2)
-  | lat a == lat b && lon a == lon b && r1 == r2 = Nothing -- FIXME need approx eq
+  | a ^. latL == b ^. latL && a ^. lonL == b ^. lonL && r1 == r2 = Nothing -- FIXME need approx eq
   | r1 + r2 < ab = Nothing
-  | any isNaN (map lat pts) || any isNaN (map lon pts) = Nothing
+  | any isNaN (map (^. latL) pts) || any isNaN (map (^. lonL) pts) = Nothing
   | otherwise = Just (p1, p2)
   where
   ab = distance a b
@@ -194,7 +196,7 @@ circleIntersectionPoints (a,r1) (b,r2)
 -- | Find the area in which all given circles intersect.  The resulting
 -- area is described in terms of the bounding arcs.   All cirlces must
 -- intersect at two points.
-intersectionArcsOf :: (Lat a, Lon a) => [Circle a] -> [Arc a]
+intersectionArcsOf :: (LatL a, LonL a) => [Circle a] -> [Arc a]
 intersectionArcsOf cs =
   let isArcWithinCircle circ arc = maximumDistanceOfArc (fst circ) arc <= (snd circ)
       isArcWithinAllCircles arc = all ($ arc) (map isArcWithinCircle cs)
@@ -209,7 +211,7 @@ intersectionArcsOf cs =
           in [(c1,c1h1,c1h2), (c1,c1h2, c1h1), (c2,c2h1,c2h2), (c2,c2h2,c2h1)]
   in filter isArcWithinAllCircles . concatMap (uncurry getArcs) . choose2 $ cs
 
-maximumDistanceOfArc :: (Lat a, Lon a) => a -> Arc a -> Distance
+maximumDistanceOfArc :: (LatL a, LonL a) => a -> Arc a -> Distance
 maximumDistanceOfArc pnt ((c,r), h1, h2) =
   let pcHeading = heading pnt c
   in if ((pcHeading < h1 || pcHeading > h2) && h1 < h2) || ((pcHeading > h2 && pcHeading < h1) && h1 > h2)
@@ -225,21 +227,21 @@ choose2 (x:xs) = map (x,) xs ++ choose2 xs
 -- southeast point (se).  Because this uses floating point there might be a
 -- different number of points in some rows (the last might be too far east based
 -- on a heading from the se point).
-divideArea :: (Lat c, Lon c) => Distance -> Distance -> c -> c -> [[c]]
+divideArea :: (LatL c, LonL c) => Distance -> Distance -> c -> c -> [[c]]
 divideArea vDist hDist nw se =
-	let (top,left)  = (lat nw, lon nw)
-	    (btm,right) = (lat se, lon se)
+	let (top,left)  = (nw ^. latL, nw ^. lonL)
+	    (btm,right) = (se ^. latL, se ^. lonL)
 	    columnOne = takeWhile ( (<= west) . heading se) . iterate (addVector (vDist, south)) $ nw
 	    buildRow  = takeWhile ((>= north) . heading se) . iterate (addVector (hDist, east))
 	in map buildRow columnOne
 
 -- |Reads a GPX file (using the GPX library) by simply concatenating all the
 -- tracks, segments, and points ('trkpts', 'trksegs', 'trks') into a single 'Trail'.
-readGPX :: FilePath -> IO (Trail WptType)
-readGPX = liftM (concatMap trkpts . concatMap trksegs . concatMap trks) . readGpxFile
+readGPX :: FilePath -> IO (Trail Wpt)
+readGPX = liftM (concatMap (^. trkptsL). concatMap (^. trksegsL) . concatMap (^. trksL)) . readGpxFile
 
-writeGPX :: FilePath -> Trail WptType -> IO ()
-writeGPX fp ps = writeGpxFile fp $ gpx $ gpxType "1.0" "Haskell GPS Package (via the GPX package)" Nothing [] [] [trkType Nothing Nothing Nothing Nothing [] Nothing Nothing Nothing [trksegType ps Nothing]] Nothing
+writeGPX :: FilePath -> Trail Wpt -> IO ()
+writeGPX fp ps = writeGpxFile fp $ gpx "1.0" "Haskell GPS Package (via the GPX package)" Nothing [] [] [trk Nothing Nothing Nothing Nothing [] Nothing Nothing Nothing [trkseg ps Nothing]] Nothing
 
 -- writeGpxFile should go in the GPX package
 writeGpxFile :: FilePath -> Gpx -> IO ()
@@ -247,5 +249,8 @@ writeGpxFile fp gpx = runX_ (constA gpx >>> xpickleDocument (xpickle :: PU Gpx) 
 
 runX_ t = runX t >> return ()
 
-readGPXSegments :: FilePath -> IO [Trail WptType]
-readGPXSegments = liftM (map (concatMap trkpts) . map trksegs . concatMap trks) . readGpxFile
+readGPXSegments :: FilePath -> IO [Trail Wpt]
+readGPXSegments = liftM (map (concatMap (^. trkptsL)) . map (^. trksegsL) . concatMap (^. trksL)) . readGpxFile
+
+readGpxFile :: FilePath -> IO [Gpx]
+readGpxFile = runX . xunpickleDocument (xpickle :: PU Gpx) [withRemoveWS yes, withValidate no]
