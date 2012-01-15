@@ -8,6 +8,7 @@ module Data.GPS.Core
        , Trail
        , Circle
        , Arc
+       , Coordinate (..)
          -- * Constants
        , north
        , south
@@ -46,6 +47,15 @@ import Text.XML.HXT.Core
 import Text.XML.XSD.DateTime(DateTime,toUTCTime)
 import Data.Geo.GPX
 import Data.Lens.Common
+
+class (LatL a, LonL a) => Coordinate a where
+  lat :: a -> Latitude
+  lat = (^. latL)
+  lon :: a -> Longitude
+  lon = (^. lonL)
+
+instance Coordinate Wpt
+instance Coordinate Pt
 
 -- |Distances are expressed in meters
 type Distance = Double
