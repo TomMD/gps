@@ -83,7 +83,7 @@ type Trail a = [a]
 getUTCTime :: (TimeL a) => a -> Maybe UTCTime
 getUTCTime = fmap toUTCTime . (^. timeL)
 
-distance :: (LatL a, LonL a, LatL b, LonL b) => a -> b -> Distance
+distance :: (Coordinate a, Coordinate b) => a -> b -> Distance
 distance x y =
   let (lat1,lon1) = getRadianPairD x
       (lat2,lon2) = getRadianPairD y
@@ -94,7 +94,7 @@ distance x y =
   in radiusOfEarth * c
 
 -- | Direction two points aim toward (0 = North, pi/2 = West, pi = South, 3pi/2 = East)
-heading         :: (LatL a, LonL a, LatL b, LonL b) => a -> b -> Heading
+heading         :: (Coordinate a, Coordinate b) => a -> b -> Heading
 heading a b =
 	atan2	(sin (diffLon) * cos (lat2))
 		(cos(lat1) * sin (lat2) - sin(lat1) * cos lat2 * cos (diffLon))
@@ -103,7 +103,7 @@ heading a b =
   (lat2, lon2) = getRadianPairD b
   diffLon = lon2 - lon1
 
-getVector :: (LatL a, LonL a, LatL b, LonL b) => a -> b -> Vector
+getVector :: (Coordinate a, Coordinate b) => a -> b -> Vector
 getVector a b = (distance a b, heading a b)
 
 -- |Given a vector and coordinate, computes a new coordinate.
@@ -116,7 +116,7 @@ getVector a b = (distance a b, heading a b)
 -- 	@heading == heading start dest@
 -- 	
 -- 	@dist    == distance start dest@
-addVector :: (LatL c, LonL c) => Vector -> c -> c
+addVector :: (Coordinate c) => Vector -> c -> c
 addVector (d,h) p = (lonL ^= longitude (toDegrees lon2))
                   . (latL ^= latitude  (toDegrees lat2))
                   $ p
@@ -128,7 +128,7 @@ addVector (d,h) p = (lonL ^= longitude (toDegrees lon2))
                            (cos (d/radiusOfEarth) - sin lat * sin lat2)
 
 -- | Speed in meters per second, only if a 'Time' was recorded for each waypoint.
-speed :: (LatL loc, LonL loc, TimeL loc, LatL b, LonL b, TimeL b) => loc -> b -> Maybe Speed
+speed :: (Coordinate loc, TimeL loc, Coordinate b, TimeL b) => loc -> b -> Maybe Speed
 speed a b = 
   case (getUTCTime b, getUTCTime a) of
     (Just x, Just y) -> 
@@ -162,14 +162,14 @@ west = pi / 2
 
 toDegrees = (*) (180 / pi)
 
-getRadianPairD :: (LatL c, LonL c) => c -> (Double,Double)
+getRadianPairD :: (Coordinate c) => c -> (Double,Double)
 getRadianPairD = (\(a,b) -> (realToFrac a, realToFrac b)) . getRadianPair
 
-getDMSPair :: (LatL c, LonL c) => c -> (Latitude, Longitude)
+getDMSPair :: (Coordinate c) => c -> (Latitude, Longitude)
 getDMSPair c = (c ^. latL, c ^. lonL)
 
 -- |Provides a lat/lon pair of doubles in radians
-getRadianPair :: (LatL p, LonL p) => p -> (Latitude, Longitude)
+getRadianPair :: (Coordinate p) => p -> (Latitude, Longitude)
 getRadianPair p = (toRadians (p ^. latL), toRadians (p ^. lonL))
 
 toRadians :: Floating f => f -> f
@@ -178,7 +178,7 @@ toRadians = (*) (pi / 180)
 -- | @interpolate c1 c2 w@ where @0 <= w <= 1@ Gives a point on the line
 -- between c1 and c2 equal to c1 when @w == 0@ (weighted linearly
 -- toward c2).
-interpolate :: (LatL a, LonL a) => a -> a -> Double -> a
+interpolate :: (Coordinate a) => a -> a -> Double -> a
 interpolate c1 c2 w
   | w < 0 || w > 1 = error "Interpolate only works with a weight between zero and one"
   | otherwise = 
@@ -188,7 +188,7 @@ interpolate c1 c2 w
 
 -- | Compute the points at which two circles intersect (assumes a flat plain).  If
 -- the circles do not intersect or are identical then the result is @Nothing@.
-circleIntersectionPoints :: (LatL a, LonL a) => (a, Distance) -> (a, Distance) -> Maybe (a,a)
+circleIntersectionPoints :: (Coordinate a) => (a, Distance) -> (a, Distance) -> Maybe (a,a)
 circleIntersectionPoints (a,r1) (b,r2)
   | a ^. latL == b ^. latL && a ^. lonL == b ^. lonL && r1 == r2 = Nothing -- FIXME need approx eq
   | r1 + r2 < ab = Nothing
@@ -206,7 +206,7 @@ circleIntersectionPoints (a,r1) (b,r2)
 -- | Find the area in which all given circles intersect.  The resulting
 -- area is described in terms of the bounding arcs.   All cirlces must
 -- intersect at two points.
-intersectionArcsOf :: (LatL a, LonL a) => [Circle a] -> [Arc a]
+intersectionArcsOf :: (Coordinate a) => [Circle a] -> [Arc a]
 intersectionArcsOf cs =
   let isArcWithinCircle circ arc = maximumDistanceOfArc (fst circ) arc <= (snd circ)
       isArcWithinAllCircles arc = all ($ arc) (map isArcWithinCircle cs)
@@ -221,7 +221,7 @@ intersectionArcsOf cs =
           in [(c1,c1h1,c1h2), (c1,c1h2, c1h1), (c2,c2h1,c2h2), (c2,c2h2,c2h1)]
   in filter isArcWithinAllCircles . concatMap (uncurry getArcs) . choose2 $ cs
 
-maximumDistanceOfArc :: (LatL a, LonL a) => a -> Arc a -> Distance
+maximumDistanceOfArc :: (Coordinate a) => a -> Arc a -> Distance
 maximumDistanceOfArc pnt ((c,r), h1, h2) =
   let pcHeading = heading pnt c
   in if ((pcHeading < h1 || pcHeading > h2) && h1 < h2) || ((pcHeading > h2 && pcHeading < h1) && h1 > h2)
@@ -237,7 +237,7 @@ choose2 (x:xs) = map (x,) xs ++ choose2 xs
 -- southeast point (se).  Because this uses floating point there might be a
 -- different number of points in some rows (the last might be too far east based
 -- on a heading from the se point).
-divideArea :: (LatL c, LonL c) => Distance -> Distance -> c -> c -> [[c]]
+divideArea :: (Coordinate c) => Distance -> Distance -> c -> c -> [[c]]
 divideArea vDist hDist nw se =
 	let (top,left)  = (nw ^. latL, nw ^. lonL)
 	    (btm,right) = (se ^. latL, se ^. lonL)
