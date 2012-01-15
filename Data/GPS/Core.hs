@@ -49,10 +49,10 @@ import Data.Geo.GPX
 import Data.Lens.Common
 
 class (LatL a, LonL a) => Coordinate a where
-  lat :: a -> Latitude
-  lat = (^. latL)
-  lon :: a -> Longitude
-  lon = (^. lonL)
+  lat :: a -> Double
+  lat = runLatitude . (^. latL)
+  lon :: a -> Double
+  lon = runLongitude . (^. lonL)
 
 instance Coordinate Wpt
 instance Coordinate Pt
