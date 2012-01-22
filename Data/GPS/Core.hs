@@ -254,13 +254,13 @@ writeGPX :: FilePath -> Trail Wpt -> IO ()
 writeGPX fp ps = writeGpxFile fp $ gpx "1.0" "Haskell GPS Package (via the GPX package)" Nothing [] [] [trk Nothing Nothing Nothing Nothing [] Nothing Nothing Nothing [trkseg ps Nothing]] Nothing
 
 -- writeGpxFile should go in the GPX package
-writeGpxFile :: FilePath -> Gpx -> IO ()
-writeGpxFile fp gpx = runX_ (constA gpx >>> xpickleDocument (xpickle :: PU Gpx) [] fp)
+writeGpxFile :: FilePath -> GPX -> IO ()
+writeGpxFile fp gpx = runX_ (constA gpx >>> xpickleDocument (xpickle :: PU GPX) [] fp)
 
 runX_ t = runX t >> return ()
 
 readGPXSegments :: FilePath -> IO [Trail Wpt]
 readGPXSegments = liftM (map (concatMap (^. trkptsL)) . map (^. trksegsL) . concatMap (^. trksL)) . readGpxFile
 
-readGpxFile :: FilePath -> IO [Gpx]
-readGpxFile = runX . xunpickleDocument (xpickle :: PU Gpx) [withRemoveWS yes, withValidate no]
+readGpxFile :: FilePath -> IO [GPX]
+readGpxFile = runX . xunpickleDocument (xpickle :: PU GPS) [withRemoveWS yes, withValidate no]
