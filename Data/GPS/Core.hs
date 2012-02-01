@@ -124,7 +124,7 @@ addVector (d,h) p = (lonL ^= longitude (toDegrees lon2))
 	(lat,lon) = getRadianPairD p
 	lat2 = asin (sin (lat) * cos (d / radiusOfEarth) + cos(lat) 
                      * sin(d/radiusOfEarth) * cos h)
-        lon2 = lon + atan2 (sin h * sin (d / radiusOfEarth) * cos lat)
+        lon2 = lon - atan2 (sin h * sin (d / radiusOfEarth) * cos lat)
                            (cos (d/radiusOfEarth) - sin lat * sin lat2)
 
 -- | Speed in meters per second, only if a 'Time' was recorded for each waypoint.
@@ -263,4 +263,4 @@ readGPXSegments :: FilePath -> IO [Trail Wpt]
 readGPXSegments = liftM (map (concatMap (^. trkptsL)) . map (^. trksegsL) . concatMap (^. trksL)) . readGpxFile
 
 readGpxFile :: FilePath -> IO [GPX]
-readGpxFile = runX . xunpickleDocument (xpickle :: PU GPS) [withRemoveWS yes, withValidate no]
+readGpxFile = runX . xunpickleDocument (xpickle :: PU GPX) [withRemoveWS yes, withValidate no]
