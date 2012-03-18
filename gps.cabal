@@ -17,7 +17,7 @@ Library
   Build-Depends: base >= 3 && < 6,
                    pretty >= 1.0 , prettyclass >= 1.0,
                    time >= 1.1, GPX >= 0.7 && < 0.8
-                 , hxt >= 9.1 && < 9.2, xsd >= 0.3 && < 0.4,
+                 , hxt >= 9.1 && < 9.3, xsd >= 0.3 && < 0.4,
                    vector >= 0.7, statistics >= 0.9, data-lens >= 2.0 && < 2.1
   hs-source-dirs:
   exposed-modules: Data.GPS
