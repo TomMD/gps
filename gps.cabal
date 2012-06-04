@@ -22,9 +22,9 @@ Library
                  vector >= 0.7,
                  statistics >= 0.9
   hs-source-dirs:
-  exposed-modules: Data.GPS
-  other-modules: Data.GPS.Core Data.GPS.Trail
-  ghc-options:
+  exposed-modules: Geo.Computations
+  other-modules: Geo.Computations.Basic, Geo.Computations.Trail
+  ghc-options: -Wall
 
 test-suite gps-tests
   hs-source-dirs: Test
