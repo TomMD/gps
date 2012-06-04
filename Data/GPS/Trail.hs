@@ -45,9 +45,9 @@ module Data.GPS.Trail
          ) where
 
 import Text.Show.Functions ()
-import Data.GPS.Core hiding (fix)
+import Data.GPS.Core
+import Geo.GPX.Conduit
 
-import Text.XML.XSD.DateTime (fromUTCTime)
 import Control.Arrow (first, second)
 import Control.Monad
 import Data.Fixed (mod')
@@ -56,7 +56,6 @@ import Data.List as L
 import Data.Maybe
 import Data.Ord
 import Data.Time
-import Data.Lens.Common
 
 import Statistics.Function as F
 import Statistics.Sample
@@ -82,13 +81,12 @@ data AvgMethod c
 -- | @avgSpeeds n points@
 -- Average speed using a window of up to @n@ seconds and averaging by taking the
 -- Median ('AvgMedian').
-avgSpeeds :: (Coordinate a, TimeL a) => NominalDiffTime -> Trail a -> [(UTCTime, Speed)]
+avgSpeeds :: NominalDiffTime -> Trail Point -> [(UTCTime, Speed)]
 avgSpeeds = slidingAverageSpeed AvgHarmonicMean
 
 -- | @slidingAverageSpeed m n@ Average speed using a moving window of up to @n@ seconds
 -- and an 'AvgMethod' of @m@.
-slidingAverageSpeed :: (Coordinate a, TimeL a) => 
-                       AvgMethod a -> NominalDiffTime -> Trail a -> [(UTCTime, Speed)]
+slidingAverageSpeed :: AvgMethod Point -> NominalDiffTime -> Trail Point -> [(UTCTime, Speed)]
 slidingAverageSpeed _ _ [] = []
 slidingAverageSpeed m minTime xs =
   let pts   = map unSelect (spansTime minTime xs)
@@ -96,7 +94,7 @@ slidingAverageSpeed m minTime xs =
       times = map getAvgTimes pts
   in concatMap maybeToList $ zipWith (\t s -> fmap (,s) t) times spds
   where
-  getTimeDiff a b = on (liftM2 diffUTCTime) getUTCTime a b
+  getTimeDiff a b = on (liftM2 diffUTCTime) pntTime a b
   
   --  getAvg :: [] -> AvgMethod -> Speed
   getAvg _ [] = 0
@@ -118,9 +116,9 @@ slidingAverageSpeed m minTime xs =
         AvgMinOf as -> minimum $ map (flip getAvg cs) as
         AvgWith f -> f cs
   getAvgTimes [] = Nothing
-  getAvgTimes [x] = getUTCTime x
+  getAvgTimes [x] = pntTime x
   getAvgTimes ps = getAvgTime (head ps) (last ps)
-  getAvgTime a b = liftM2 addUTCTime (getTimeDiff b a) (getUTCTime a)
+  getAvgTime a b = liftM2 addUTCTime (getTimeDiff b a) (pntTime a)
   getSpeedsV = V.fromList . getSpeeds
   getSpeeds zs = concatMap maybeToList $ zipWith speed zs (drop 1 zs)
 
@@ -175,7 +173,7 @@ dropExact i (x:xs) =
 -- and all others outside of the speed.  The "speed" from point p(i)
 -- to p(i+1) is associated with p(i) (execpt for the first speed
 -- value, which is associated with both the first and second point)
-betweenSpeeds :: (Coordinate a, TimeL a) => Double -> Double -> PointGrouping a
+betweenSpeeds :: Double -> Double -> PointGrouping Point
 betweenSpeeds low hi ps =
   let spds = concatMap maybeToList $ zipWith speed ps (drop 1 ps)
       psSpds = [(p,s) | p <- ps, s <- maybeToList (listToMaybe spds) ++ spds]
@@ -189,7 +187,7 @@ betweenSpeeds low hi ps =
 
 -- | A "rest point" means the coordinates remain within a given distance
 -- for at least a particular amount of time.
-restLocations :: (Coordinate a, TimeL a) => Distance -> NominalDiffTime -> PointGrouping a
+restLocations :: Distance -> NominalDiffTime -> PointGrouping Point
 restLocations d s ps =
   let consToFirst x [] = [NotSelect [x]]
       consToFirst x (a:as) = (fmap (x:) a) : as
@@ -198,7 +196,7 @@ restLocations d s ps =
       go (a:as) nonRests =
         case takeWhileEnd ((<=) d . distance a) as of
           (Just l, close, far) ->
-            case (getUTCTime a, getUTCTime l) of
+            case (pntTime a, pntTime l) of
               (Just t1, Just t2) ->
                 let diff = diffUTCTime t2 t1
                 in if diff >= s then NotSelect (reverse nonRests) : Select (a:close) : go far [] else go as (a:nonRests)
@@ -208,7 +206,7 @@ restLocations d s ps =
      
 -- |chunking points into groups spanning at most the given time
 -- interval.
-spansTime :: (Coordinate a, TimeL a) => NominalDiffTime -> PointGrouping a
+spansTime :: NominalDiffTime -> PointGrouping Point
 spansTime n ps =
   let times  = mkTimePair ps
       chunk [] = []
@@ -218,7 +216,7 @@ spansTime n ps =
   in map (Select . map fst) $ chunk times
 
 -- | intersects the given groupings
-intersectionOf :: (Coordinate a, TimeL a) => [PointGrouping a] -> PointGrouping a
+intersectionOf :: [PointGrouping Point] -> PointGrouping Point
 intersectionOf gs ps =
   let groupings = map ($ ps) gs
       -- chunk :: [[Selected [pnts]]] -> pnts -> [pnts]
@@ -231,7 +229,7 @@ intersectionOf gs ps =
   in chunk groupings ps
 
 -- | Union all the groupings
-unionOf :: (Coordinate a, TimeL a) => [PointGrouping a] -> PointGrouping a
+unionOf :: [PointGrouping Point] -> PointGrouping Point
 unionOf gs ps =
   let groupings = map ($ ps) gs
       chunk _ [] = []
@@ -328,9 +326,9 @@ filterPoints g = concatMap unSelect . filter isSelected . g
 
 -- Extract the time from each coordinate.  If no time is available then
 -- the coordinate is dropped!
-mkTimePair :: (TimeL a) => Trail a -> [(a,UTCTime)]
+mkTimePair :: Trail Point -> [(Point,UTCTime)]
 mkTimePair xs =
-  let timesM = map (\x-> fmap (x,) $ getUTCTime x) xs
+  let timesM = map (\x-> fmap (x,) $ pntTime x) xs
   in concatMap maybeToList timesM
 
 -- |Construct a bezier curve using the provided trail.  Construct a
@@ -338,7 +336,7 @@ mkTimePair xs =
 -- The current implementation assumes the times of the input
 -- coordinates are available and all equal (Ex: all points are 5
 -- seconds apart), the results will be poor if this is not the case!
-bezierCurveAt :: (Coordinate a, TimeL a) => [UTCTime] -> Trail a -> Trail a
+bezierCurveAt :: [UTCTime] -> Trail Point -> Trail Point
 bezierCurveAt _ [] = []
 bezierCurveAt selectedTimes xs = 
   let timesDef = mkTimePair xs
@@ -355,9 +353,9 @@ bezierCurveAt selectedTimes xs =
          then xs
          else let curvePoints = (map (bezierPoint xs) queryTimes)
                   newTimes = [addUTCTime t (snd top) | t <- diffTimes]
-              in zipWith ((timeL ^=) . Just . fromUTCTime) newTimes curvePoints
+              in zipWith (\t p -> p { pntTime = Just t}) newTimes curvePoints
 
-bezierPoint :: (Coordinate a) => [a] -> Double -> a
+bezierPoint :: [Point] -> Double -> Point
 bezierPoint pnts t   = go pnts
   where
   go [] = error "GPS Package: Can not create a bezier point from an empty list"
@@ -368,36 +366,36 @@ bezierPoint pnts t   = go pnts
 -- exponentially more expensive with the length of the segement being
 -- transformed - it is not advisable to perform this operation on
 -- trail segements with more than ten points!
-bezierCurve ::  (Coordinate a, TimeL a) => [Selected (Trail a)] -> Trail a
+bezierCurve ::  [Selected (Trail Point)] -> Trail Point
 bezierCurve = concatMap (onSelected (bezierCurveAt []) Prelude.id)
 
 -- |Filters out any points that go backward in time (thus must not be
 -- valid if this is a trail)
-linearTime :: (Coordinate a, TimeL a) => [a] -> [a]
+linearTime :: [Point] -> [Point]
 linearTime [] = []
-linearTime (p:ps) = go (getUTCTime p) ps
+linearTime (p:ps) = go (pntTime p) ps
   where
   go _ [] = []
-  go t (p:ps) = if getUTCTime p < t then go t ps else p : go (getUTCTime p) ps
+  go t (p:ps) = if pntTime p < t then go t ps else p : go (pntTime p) ps
 
 -- |Returns the closest distance between two trails (or Nothing if a
 -- trail is empty).  Inefficient implementation:
 -- O( (n * m) * log (n * m) )
-closestDistance :: (Coordinate a) => Trail a -> Trail a -> Maybe Distance
+closestDistance :: Trail Point -> Trail Point -> Maybe Distance
 closestDistance as bs = listToMaybe $ L.sort [distance a b | a <- as, b <- bs]
 
 -- | Find the total distance traveled
-totalDistance :: (Coordinate a) => [a] -> Distance
+totalDistance :: [Point] -> Distance
 totalDistance as = sum $ zipWith distance as (drop 1 as)
 
-totalTime :: TimeL a => Trail a -> NominalDiffTime
+totalTime :: Trail Point -> NominalDiffTime
 totalTime [] = 0
-totalTime xs@(x:_) = fromMaybe 0 $ liftM2 diffUTCTime (getUTCTime x) (getUTCTime $ last xs)
+totalTime xs@(x:_) = fromMaybe 0 $ liftM2 diffUTCTime (pntTime x) (pntTime $ last xs)
 
 -- | Uses Grahams scan to compute the convex hull of the given points.
 -- This operation requires sorting of the points, so don't try it unless
 -- you have notably more memory than the list of points will consume.
-convexHull :: (Eq c, Coordinate c) => [c] -> [c]
+convexHull :: [Point] -> [Point]
 convexHull xs =
 	let first = southMost xs
 	in case first of
@@ -417,12 +415,12 @@ convexHull xs =
 		Straight  -> grahamScan (x:p2:p1:ps) xs
 		_	  -> grahamScan (p1:ps) (x:xs)
 
-eastZeroHeading :: (Coordinate c) => c -> c -> Heading
+eastZeroHeading :: Point -> Point -> Heading
 eastZeroHeading s = (`mod'` (2*pi)) . (+ pi/2) . heading s
 
 data Turn = LeftTurn | RightTurn | Straight deriving (Eq, Ord, Show, Read, Enum)
 
-turn :: (Coordinate c) => c -> c -> c -> Turn
+turn :: Point -> Point -> Point -> Turn
 turn a b c =
 	let h1 = eastZeroHeading a b
 	    h2 = eastZeroHeading b c
@@ -430,9 +428,9 @@ turn a b c =
 	in if d >= 0 && d < pi then LeftTurn else RightTurn
 
 -- | Find the southmost point
-southMost :: (LatL c) => [c] -> Maybe c
+southMost :: [Point] -> Maybe Point
 southMost []  = Nothing
-southMost cs = Just . minimumBy (comparing (^. latL)) $ cs
+southMost cs = Just . minimumBy (comparing pntLat) $ cs
 
 ---------- COMPOSIT OPERATIONS ---------------
 -- These operations are simply implemented using the previously
@@ -440,10 +438,10 @@ southMost cs = Just . minimumBy (comparing (^. latL)) $ cs
 -- users or as instructional examples.
 ------------------------------------------
 
-smoothRests :: (Coordinate a, TimeL a) => Trail a -> Trail a
+smoothRests :: Trail Point -> Trail Point
 smoothRests = bezierCurve . refineGrouping (everyNPoints 8) . restLocations 30 60
 
-smoothSome :: (Coordinate a, TimeL a) => Trail a -> Trail a
+smoothSome :: Trail Point -> Trail Point
 smoothSome = gSmoothSome 7
 
 gSmoothSome n = bezierCurve . everyNPoints n
@@ -453,12 +451,12 @@ gSmoothMore n k ps =
       (h,t) = splitAt k ps'
   in h ++ gSmoothSome n t
 
-smoothMore :: (Coordinate a, TimeL a) => Trail a -> Trail a
+smoothMore :: Trail Point -> Trail Point
 smoothMore
   = gSmoothMore 7 3 . gSmoothMore 3 1 . gSmoothMore 5 2
   . gSmoothMore 3 1 . gSmoothMore 5 2 . gSmoothMore 7 3
   
-slidingWindow :: Int -> Int -> ([a] -> [a]) -> [a] -> [a]
+slidingWindow :: Int -> Int -> ([Point] -> [Point]) -> [Point] -> [Point]
 slidingWindow width step f trail = go trail
   where
     go [] = []

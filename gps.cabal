@@ -1,5 +1,5 @@
 name:		gps
-version:	1.0.3
+version:	1.1
 license:	BSD3
 license-file:	LICENSE
 author:		Thomas DuBuisson <thomas.dubuisson@gmail.com>
@@ -15,10 +15,12 @@ extra-source-files:
 
 Library
   Build-Depends: base >= 3 && < 6,
-                   pretty >= 1.0 , prettyclass >= 1.0,
-                   time >= 1.1, GPX >= 0.7 && < 0.8
-                 , hxt >= 9.1 && < 9.3, xsd >= 0.3 && < 0.4,
-                   vector >= 0.7, statistics >= 0.9, data-lens >= 2.0 && < 2.1
+                 pretty >= 1.0,
+                 prettyclass >= 1.0,
+                 time >= 1.4,
+                 gpx-conduit >= 0.1,
+                 vector >= 0.7,
+                 statistics >= 0.9
   hs-source-dirs:
   exposed-modules: Data.GPS
   other-modules: Data.GPS.Core Data.GPS.Trail
