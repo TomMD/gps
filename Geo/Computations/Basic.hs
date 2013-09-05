@@ -27,13 +27,11 @@ module Geo.Computations.Basic
        , circleIntersectionPoints
        , intersectionArcsOf
        , maximumDistanceOfArc
-         -- * IO helpers
-       , readGPXFile
        ) where
 
 import Data.Time
 import Data.Maybe
-import Geo.GPX.Conduit
+import Geo.Types
 
 -- |Distances are expressed in meters
 type Distance = Double

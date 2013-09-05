@@ -45,7 +45,7 @@ module Geo.Computations.Trail
 
 import Text.Show.Functions ()
 import Geo.Computations.Basic
-import Geo.GPX.Conduit ()
+import Geo.Types
 
 import Control.Arrow (first)
 import Control.Monad
@@ -55,6 +55,7 @@ import Data.List as L
 import Data.Maybe
 import Data.Ord
 import Data.Time
+
 
 import Statistics.Function as F
 import Statistics.Sample
