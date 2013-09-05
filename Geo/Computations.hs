@@ -6,7 +6,9 @@
 module Geo.Computations
        ( module Geo.Computations.Basic
        , module Geo.Computations.Trail
+       , module Geo.Types
        ) where
 
 import Geo.Computations.Basic
 import Geo.Computations.Trail
+import Geo.Types

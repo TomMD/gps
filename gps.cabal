@@ -22,7 +22,7 @@ Library
                  statistics >= 0.9,
                  text
   hs-source-dirs:
-  exposed-modules: Geo.Computations
+  exposed-modules: Geo.Computations, Geo.Types
   other-modules: Geo.Computations.Basic, Geo.Computations.Trail
   ghc-options: -Wall
 
