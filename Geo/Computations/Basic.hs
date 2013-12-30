@@ -37,10 +37,10 @@ import Geo.Types
 type Distance = Double
 
 -- |Angles are expressed in radians from North.
--- 	0	== North
--- 	pi/2	== West
--- 	pi 	== South
--- 	(3/2)pi	== East    == - (pi / 2)
+--      0       == North
+--      pi/2    == West
+--      pi      == South
+--      (3/2)pi == East    == - (pi / 2)
 type Heading = Double
 
 -- |Speed is hard coded as meters per second
@@ -69,8 +69,8 @@ distance x y =
 -- | Direction two points aim toward (0 = North, pi/2 = West, pi = South, 3pi/2 = East)
 heading         :: Point -> Point -> Heading
 heading a b =
-	atan2	(sin (diffLon) * cos (lat2))
-		(cos(lat1) * sin (lat2) - sin(lat1) * cos lat2 * cos (diffLon))
+        atan2   (sin (diffLon) * cos (lat2))
+                (cos(lat1) * sin (lat2) - sin(lat1) * cos lat2 * cos (diffLon))
  where
   (lat1, lon1) = getRadianPair a
   (lat2, lon2) = getRadianPair b
@@ -82,23 +82,23 @@ getVector a b = (distance a b, heading a b)
 -- |Given a vector and coordinate, computes a new coordinate.
 -- Within some epsilon it should hold that if
 --
--- 	@dest = addVector (dist,heading) start@
+--      @dest = addVector (dist,heading) start@
 --
 -- then
 --
--- 	@heading == heading start dest@
--- 	
--- 	@dist    == distance start dest@
+--      @heading == heading start dest@
+--      
+--      @dist    == distance start dest@
 addVector :: Vector -> Point -> Point
 addVector (d,h) p =
                   p { pntLon = toDegrees lon2
-		    , pntLat = toDegrees lat2
-			}
+                    , pntLat = toDegrees lat2
+                        }
   where
-	(lat,lon) = getRadianPair p
-	lat2 = asin (sin lat * cos (d / radiusOfEarth) + cos lat
+        (lat,lon) = getRadianPair p
+        lat2 = asin (sin lat * cos (d / radiusOfEarth) + cos lat
                      * sin(d/radiusOfEarth) * cos h)
-        lon2 = lon - atan2 (sin h * sin (d / radiusOfEarth) * cos lat)
+        lon2 = lon + atan2 (sin h * sin (d / radiusOfEarth) * cos lat)
                            (cos (d/radiusOfEarth) - sin lat * sin lat2)
 
 -- | Speed in meters per second, only if a 'Time' was recorded for each waypoint.

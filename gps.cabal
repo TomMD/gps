@@ -34,9 +34,9 @@ test-suite gps-tests
   build-depends:
     base >= 4.0,
     QuickCheck >= 2.4.0.1,
-    test-framework >= 0.3.3 && < 0.5,
-    test-framework-quickcheck2 >= 0.2.9 && < 0.3,
-    time, GPX, hxt, xsd, vector, statistics, gps
+    test-framework >= 0.3.3,
+    test-framework-quickcheck2 >= 0.2.9,
+    time, vector, statistics, gps, gpx-conduit
 
   ghc-options: -Wall
 source-repository head
