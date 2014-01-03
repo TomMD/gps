@@ -21,7 +21,7 @@ instance Arbitrary NominalDiffTime where
 instance Arbitrary Point where
   arbitrary =
     pt      <$> fmap (`mod'` 90) arbitrary -- Lat
-            <*> fmap (`mod'` 90) arbitrary -- Lon
+            <*> fmap (`mod'` 180) arbitrary -- Lon
             <*> arbitrary -- Time
             <*> arbitrary -- elevation
 
