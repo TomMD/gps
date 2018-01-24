@@ -45,7 +45,6 @@ module Geo.Computations.Trail
 
 import Text.Show.Functions ()
 import Geo.Computations.Basic
-import Geo.Types
 
 import Control.Arrow (first)
 import Control.Monad
@@ -340,7 +339,7 @@ bezierCurveAt selectedTimes xs =
       diffTimes = [diffUTCTime t (snd top) / tTime | t <- times]
       queryTimes = map realToFrac diffTimes
   in if tTime <= 0 || any (\x -> x < 0 || x > 1) queryTimes
-	then xs -- error "bezierCurveAt has a out-of-bound time!"
+        then xs -- error "bezierCurveAt has a out-of-bound time!"
         else
          if null timesDef || any (\x -> x < 0 || x > 1) queryTimes
          then xs
@@ -390,23 +389,23 @@ totalTime xs@(x:_) = fromMaybe 0 $ liftM2 diffUTCTime (pntTime x) (pntTime $ las
 -- you have notably more memory than the list of points will consume.
 convexHull :: [Point] -> [Point]
 convexHull lst =
-	let frst = southMost lst
-	in case frst of
-		Nothing -> []
-		Just f  ->
-	    	     let sorted = L.sortBy (comparing (eastZeroHeading f)) (filter (/= f) lst)
-		     in case sorted of
-			(a:b:cs) -> grahamScan (b:a:f:[]) cs
-			cs       -> f : cs
+        let frst = southMost lst
+        in case frst of
+                Nothing -> []
+                Just f  ->
+                     let sorted = L.sortBy (comparing (eastZeroHeading f)) (filter (/= f) lst)
+                     in case sorted of
+                        (a:b:cs) -> grahamScan (b:a:f:[]) cs
+                        cs       -> f : cs
   where
   grahamScan [] _ = []
   grahamScan ps [] = ps
   grahamScan (x:[]) _ = [x]
   grahamScan (p2:p1:ps) (x:xs) =
-	case turn p1 p2 x of
-		LeftTurn  -> grahamScan (x:p2:p1:ps) xs
-		Straight  -> grahamScan (x:p2:p1:ps) xs
-		_	  -> grahamScan (p1:ps) (x:xs)
+        case turn p1 p2 x of
+                LeftTurn  -> grahamScan (x:p2:p1:ps) xs
+                Straight  -> grahamScan (x:p2:p1:ps) xs
+                _         -> grahamScan (p1:ps) (x:xs)
 
 eastZeroHeading :: Point -> Point -> Heading
 eastZeroHeading s = (`mod'` (2*pi)) . (+ pi/2) . heading s
@@ -415,10 +414,10 @@ data Turn = LeftTurn | RightTurn | Straight deriving (Eq, Ord, Show, Read, Enum)
 
 turn :: Point -> Point -> Point -> Turn
 turn a b c =
-	let h1 = eastZeroHeading a b
-	    h2 = eastZeroHeading b c
-	    d  = h2 - h1
-	in if d >= 0 && d < pi then LeftTurn else RightTurn
+        let h1 = eastZeroHeading a b
+            h2 = eastZeroHeading b c
+            d  = h2 - h1
+        in if d >= 0 && d < pi then LeftTurn else RightTurn
 
 -- | Find the southmost point
 southMost :: [Point] -> Maybe Point
