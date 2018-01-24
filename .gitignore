@@ -1,0 +1,3 @@
+.ghc.environ*
+dist
+dist-newstyle
