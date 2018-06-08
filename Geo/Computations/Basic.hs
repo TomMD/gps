@@ -156,7 +156,7 @@ interpolate c1 c2 w
       v = (d * w, h)
   in addVector v c1
 
--- | Compute the points at which two circles intersect (assumes a flat plain).  If
+-- | Compute the points at which two circles intersect (assumes a flat plane).  If
 -- the circles do not intersect or are identical then the result is @Nothing@.
 circleIntersectionPoints :: (Point, Distance) -> (Point, Distance) -> Maybe (Point,Point)
 circleIntersectionPoints (a,r1) (b,r2)
