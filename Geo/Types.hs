@@ -9,16 +9,16 @@ data Track = Track
         }
         deriving (Eq, Ord, Show, Read)
 
--- |A GPX segments is just a bundle of points.
+-- | A GPX segment is just a bundle of points.
 data Segment = Segment { points  :: [Point] }
         deriving (Eq, Ord, Show, Read)
 
 type Latitude = Double
 type Longitude = Double
 
--- |Track point is a full-fledged representation of all the data
+-- | Track point is a full-fledged representation of all the data
 -- available in most GPS loggers.  It is possible you don't want
--- all this data and can just made do with coordinates (via 'Pnt')
+-- all this data, and can just be done with coordinates (via 'Pnt')
 -- or a custom derivative.
 data Point = Point
         { pntLat        :: Latitude
