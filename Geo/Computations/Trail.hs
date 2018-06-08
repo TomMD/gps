@@ -129,7 +129,7 @@ slidingAverageSpeed m minTime xs =
 --     concatMap unSelect (g ts) == ts
 --
 -- The purpose of grouping is usually for later processing.  Any desire to drop
--- points that didn't meet a particular grouping criteria can be filled with
+-- points that didn't meet a particular grouping criterion can be filled with
 -- a composition with 'filter' (or directly via 'filterPoints').
 type PointGrouping c = Trail c -> [Selected (Trail c)]
 
@@ -170,7 +170,7 @@ dropExact i (x:xs) =
 
 -- | Groups trail segments into contiguous points within the speed
 -- and all others outside of the speed.  The "speed" from point p(i)
--- to p(i+1) is associated with p(i) (execpt for the first speed
+-- to p(i+1) is associated with p(i) (except for the first speed
 -- value, which is associated with both the first and second point)
 betweenSpeeds :: Double -> Double -> PointGrouping Point
 betweenSpeeds low hi ps =
@@ -203,7 +203,7 @@ restLocations d s ps =
           _ -> consToFirst a $ go as nonRests
   in go ps []
      
--- |chunking points into groups spanning at most the given time
+-- | Chunks points into groups spanning at most the given time
 -- interval.
 spansTime :: NominalDiffTime -> PointGrouping Point
 spansTime n ps =
@@ -214,7 +214,7 @@ spansTime n ps =
         in if null good then [xs] else good : chunk rest
   in map (Select . map fst) $ chunk times
 
--- | intersects the given groupings
+-- | Intersects the given groupings
 intersectionOf :: [PointGrouping Point] -> PointGrouping Point
 intersectionOf gs ps =
   let groupings = map ($ ps) gs
@@ -282,11 +282,11 @@ selListDrop n (x:xs) =
   let x' = drop n (unSelect x)
   in fmap (const x') x : selListDrop (n - (selLength x - length x')) xs
 
--- |Inverts the selected/nonselected segments
+-- | Inverts the selected/nonselected segments
 invertSelection :: TransformGrouping a
 invertSelection = map (onSelected NotSelect Select)
 
--- |@firstGrouping f ps@ only the first segment remains 'Select'ed, and only
+-- | @firstGrouping f ps@ only the first segment remains 'Select'ed, and only
 -- if it was already selected by @f@.
 firstGrouping ::  TransformGrouping a
 firstGrouping ps = take 1 ps ++ map (NotSelect . unSelect) (drop 1 ps)
@@ -296,7 +296,7 @@ firstGrouping ps = take 1 ps ++ map (NotSelect . unSelect) (drop 1 ps)
 lastGrouping ::  TransformGrouping a
 lastGrouping ps  = let ps' = reverse ps in reverse $ take 1 ps' ++ map (NotSelect . unSelect) (drop 1 ps')
 
--- | chunk the trail into groups of N points
+-- | Chunks the trail into groups of N points
 everyNPoints ::  Int -> PointGrouping a
 everyNPoints n ps
   | n <= 0 = [NotSelect ps]
@@ -305,14 +305,14 @@ everyNPoints n ps
       go [] = []
       go xs = let (h,t) = splitAt n xs in Select h : go t
   
--- |For every selected group, refine the selection using the second
+-- | For every selected group, refine the selection using the second
 -- grouping method.  This differs from 'IntersectionOf' by restarting
 -- the second grouping algorithm at the beginning each group selected
 -- by the first algorithm.
 refineGrouping ::  PointGrouping a -> TransformGrouping a
 refineGrouping b = concatMap (onSelected b (\x -> [NotSelect x]))
 
--- |Remove all points that remain 'NotSelect'ed by the given grouping algorithm.
+-- | Remove all points that remain 'NotSelect'ed by the given grouping algorithm.
 filterPoints :: PointGrouping a -> Trail a -> Trail a
 filterPoints g = concatMap unSelect . filter isSelected . g
 
@@ -323,7 +323,7 @@ mkTimePair xs =
   let timesM = map (\x-> fmap (x,) $ pntTime x) xs
   in concatMap maybeToList timesM
 
--- |Construct a bezier curve using the provided trail.  Construct a
+-- | Construct a bezier curve using the provided trail.  Construct a
 -- new trail by sampling the given bezier curve at the given times.
 -- The current implementation assumes the times of the input
 -- coordinates are available and all equal (Ex: all points are 5
@@ -354,14 +354,14 @@ bezierPoint pnts t   = go pnts
   go [p] = p
   go ps = interpolate (go (init ps)) (go (tail ps)) t
 
--- |Interpolate selected points onto a bezier curve.  Note this gets
--- exponentially more expensive with the length of the segement being
+-- | Interpolate selected points onto a bezier curve.  Note this gets
+-- exponentially more expensive with the length of the segment being
 -- transformed - it is not advisable to perform this operation on
 -- trail segements with more than ten points!
 bezierCurve ::  [Selected (Trail Point)] -> Trail Point
 bezierCurve = concatMap (onSelected (bezierCurveAt []) Prelude.id)
 
--- |Filters out any points that go backward in time (thus must not be
+-- | Filter out any points that go backward in time (thus must not be
 -- valid if this is a trail)
 linearTime :: [Point] -> [Point]
 linearTime [] = []
@@ -370,7 +370,7 @@ linearTime (p:ps) = go (pntTime p) ps
   go _ [] = []
   go t (x:xs) = if pntTime x < t then go t xs else x : go (pntTime x) xs
 
--- |Returns the closest distance between two trails (or Nothing if a
+-- | Return the closest distance between two trails (or Nothing if a
 -- trail is empty).  Inefficient implementation:
 -- O( (n * m) * log (n * m) )
 closestDistance :: Trail Point -> Trail Point -> Maybe Distance
@@ -437,10 +437,10 @@ southMost cs = Just . minimumBy (comparing pntLat) $ cs
 smoothRests :: Trail Point -> Trail Point
 smoothRests = bezierCurve . refineGrouping (everyNPoints 8) . restLocations 30 60
 
--- |Smooth every 7 points using a bezier curve
+-- | Smooth every 7 points using a bezier curve
 smoothTrail :: Trail Point -> Trail Point
 smoothTrail = gSmoothSome 7
 
--- |Smooth every n points using a bezier curve
+-- | Smooth every n points using a bezier curve
 gSmoothSome :: Int -> Trail Point -> Trail Point
 gSmoothSome n = bezierCurve . everyNPoints n
