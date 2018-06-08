@@ -137,7 +137,7 @@ west = pi / 2
 toDegrees :: Double -> Double
 toDegrees = (*) (180 / pi)
 
--- get latitude and longitude in Radians as Double's
+-- Get latitude and longitude in Radians as 'Double's
 getRadianPair :: Point -> (Double,Double)
 getRadianPair p = (toRadians (pntLat p), toRadians (pntLon p))
 
