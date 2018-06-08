@@ -1,6 +1,6 @@
 GPS
 =================
-#### Querying and manipulating gps coordinates
+#### Querying and manipulating GPS coordinates
 * * *
 
 This is a Haskell library for querying and manipulating GPS
@@ -17,4 +17,4 @@ Features
 The Future
 ---------- 
 
-- Determine the "best guess" triangulation coordinate given an set of intersecting circles.
+- Determine the "best guess" triangulation coordinate given a set of intersecting circles.
