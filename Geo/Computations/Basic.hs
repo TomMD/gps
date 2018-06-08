@@ -33,21 +33,21 @@ import Data.Time
 import Data.Maybe
 import Geo.Types
 
--- |Distances are expressed in meters
+-- | Distances are expressed in meters
 type Distance = Double
 
--- |Angles are expressed in radians from North.
+-- | Angles are expressed in radians from North.
 --      0       == North
 --      pi/2    == West
 --      pi      == South
 --      (3/2)pi == East    == - (pi / 2)
 type Heading = Double
 
--- |Speed is hard coded as meters per second
+-- | Speed is hard-coded as meters per second
 type Speed = Double
 type Vector = (Distance, Heading)
 
--- | Genearlly a circle indicates a known area in which we are searching
+-- | Generally a circle indicates a known area in which we are searching
 -- (so a center point and maximum possible distance from that point)
 type Circle a = (a, Distance)
 
@@ -79,7 +79,7 @@ heading a b =
 getVector :: Point -> Point -> Vector
 getVector a b = (distance a b, heading a b)
 
--- |Given a vector and coordinate, computes a new coordinate.
+-- | Given a vector and coordinate, computes a new coordinate.
 -- Within some epsilon it should hold that if
 --
 --      @dest = addVector (dist,heading) start@
@@ -110,34 +110,34 @@ speed a b =
       in if timeDiff == 0 then Nothing else Just $ (distance a b) / timeDiff
     _ -> Nothing
 
--- |radius of the earth in meters
+-- | Radius of the Earth in meters
 radiusOfEarth :: Double
 radiusOfEarth = 6378700
 
--- |Circumference of earth (meters)
+-- | Circumference of Earth (meters)
 circumferenceOfEarth :: Double
 circumferenceOfEarth = radiusOfEarth * 2 * pi
 
--- |North is 0 radians
+-- | North is 0 radians
 north :: Heading
 north = 0
 
--- |South, being 180 degrees from North, is pi.
+-- | South, being 180 degrees from North, is pi.
 south :: Heading
 south = pi
 
--- |East is 270 degrees (3 pi / 2)
+-- | East is 270 degrees (3 pi / 2)
 east :: Heading
 east = (3 / 2) * pi
 
--- |West is 90 degrees (pi/2)
+-- | West is 90 degrees (pi / 2)
 west :: Heading
 west = pi / 2
 
 toDegrees :: Double -> Double
 toDegrees = (*) (180 / pi)
 
--- get latitude and longituide in Radians as Double's
+-- get latitude and longitude in Radians as Double's
 getRadianPair :: Point -> (Double,Double)
 getRadianPair p = (toRadians (pntLat p), toRadians (pntLon p))
 
@@ -174,7 +174,7 @@ circleIntersectionPoints (a,r1) (b,r2)
   pts = [p1,p2]
 
 -- | Find the area in which all given circles intersect.  The resulting
--- area is described in terms of the bounding arcs.   All cirlces must
+-- area is described in terms of the bounding arcs.   All circles must
 -- intersect at two points.
 intersectionArcsOf :: [Circle Point] -> [Arc Point]
 intersectionArcsOf cs =
