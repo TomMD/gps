@@ -4,7 +4,7 @@ license:        BSD3
 license-file:   LICENSE
 author:         Thomas DuBuisson <thomas.dubuisson@gmail.com>
 maintainer:     Thomas DuBuisson
-description:    Useful for manipulating GPS coordinages (in various forms), building paths, and performing basic computations.
+description:    Useful for manipulating GPS coordinates (in various forms), building paths, and performing basic computations.
 synopsis:       For manipulating GPS coordinates and trails.
 category:       Data
 stability:      stable
