@@ -382,7 +382,7 @@ totalDistance as = sum $ zipWith distance as (drop 1 as)
 
 totalTime :: Trail Point -> NominalDiffTime
 totalTime [] = 0
-totalTime xs@(x:_) = fromMaybe 0 $ liftM2 diffUTCTime (pntTime x) (pntTime $ last xs)
+totalTime xs@(x:_) = fromMaybe 0 $ liftM2 diffUTCTime (pntTime $ last xs) (pntTime x)
 
 -- | Uses Grahams scan to compute the convex hull of the given points.
 -- This operation requires sorting of the points, so don't try it unless
